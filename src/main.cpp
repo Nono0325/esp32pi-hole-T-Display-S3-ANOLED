@@ -721,7 +721,7 @@ static bool handleDns() {
       rlen = buildLocalAnswer(qend, qtype, localTargetIp);
       totalAllowed++;
       if (c) c->allowed++;
-      recordQueryActivity(false);
+      recordQueryActivity(false, (uint16_t)(qlen + rlen));
       recordQueryLog(domain, (uint32_t)cip, false, true);
     } else {
       bool allowedByWhitelist = isAllowedDomain(domain);
@@ -730,13 +730,13 @@ static bool handleDns() {
         rlen = buildBlocked(qend, qtype);
         totalBlocked++;
         if (c) c->blocked++;
-        recordQueryActivity(true);
+        recordQueryActivity(true, (uint16_t)(qlen + rlen));
         recordBlockedDomain(domain);
       } else {
         rlen = forwardUpstream(qlen, qend);
         totalAllowed++;
         if (c) c->allowed++;
-        recordQueryActivity(false);
+        recordQueryActivity(false, (uint16_t)(qlen + rlen));
       }
       if (dl) recordQueryLog(domain, (uint32_t)cip, blocked, false);
     }
@@ -854,6 +854,10 @@ static void handleStats() {
   j += ",\"netOnline\":" + String(internetOnline ? "true" : "false");
   j += ",\"pingRtt\":" + String(internetPingRtt);
   j += ",\"offlineSec\":" + String(internetOnline ? 0 : (millis() - internetOfflineSince) / 1000);
+  j += ",\"qps\":" + String(getCurrentQPS(), 1);
+  j += ",\"bps\":" + String(getCurrentBPS(), 1);
+  j += ",\"peak_qps\":" + String(getPeakQPS(), 1);
+  j += ",\"peak_bps\":" + String(getPeakBPS(), 1);
   j += ",\"logs\":[";
   int outCount = (logCount > 35) ? 35 : logCount;
   for (int i = 0; i < outCount; i++) {
@@ -1288,11 +1292,17 @@ void setup() {
   const int BOOT_PIN = 0;     // classic ESP32 / S3 BOOT button
 #endif
   pinMode(BOOT_PIN, INPUT_PULLUP);
-  if (digitalRead(BOOT_PIN) == LOW) { delay(60);
-    if (digitalRead(BOOT_PIN) == LOW) {
+  if (digitalRead(BOOT_PIN) == LOW) {
+    uint32_t pressStart = millis();
+    bool held = true;
+    while (millis() - pressStart < 2500) {
+      if (digitalRead(BOOT_PIN) != LOW) { held = false; break; }
+      delay(50);
+    }
+    if (held) {
       prefs.begin("wifi", false); prefs.clear(); prefs.end();
       resetAuthCreds();
-      Serial.println("[setup] BOOT held -> cleared saved WiFi and reset credentials");
+      Serial.println("[setup] BOOT held 2.5s -> cleared saved WiFi and reset credentials");
     }
   }
 

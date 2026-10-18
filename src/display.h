@@ -12,8 +12,14 @@ void updateDisplay(bool force = false);
 // Show a temporary message toast on screen (e.g., "PAUSED (5m)", "UPDATING...")
 void displayToast(const char* message, uint32_t durationMs = 2500);
 
-// Record query activity for the history sparkline graph
-void recordQueryActivity(bool blocked);
+// Record query activity for the history sparkline graph and rate tracking
+void recordQueryActivity(bool blocked, uint16_t bytes = 64);
+
+// Live traffic rate and throughput getters
+float getCurrentQPS();
+float getCurrentBPS();
+float getPeakQPS();
+float getPeakBPS();
 
 // Set display brightness (0 - 255)
 void setDisplayBrightness(uint8_t brightness);

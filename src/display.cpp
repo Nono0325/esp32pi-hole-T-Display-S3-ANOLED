@@ -86,12 +86,21 @@ static Preferences dispPrefs;
 static String toastMsg = "";
 static uint32_t toastExpiry = 0;
 
-// Query History Graph (Rolling 24 time buckets)
-#define HIST_SLOTS 24
-static uint16_t histBlocked[HIST_SLOTS] = {0};
-static uint16_t histAllowed[HIST_SLOTS] = {0};
-static uint8_t histIdx = 0;
-static uint32_t lastHistRoll = 0;
+// High-Resolution Real-Time Traffic & Rate Tracking
+#define WAVE_SLOTS 48
+static uint16_t waveTotal[WAVE_SLOTS] = {0};
+static uint16_t waveBlocked[WAVE_SLOTS] = {0};
+static uint8_t waveIdx = 0;
+
+static uint32_t secQueries = 0;
+static uint32_t secBlocked = 0;
+static uint32_t secBytes = 0;
+static uint32_t lastSecCalc = 0;
+
+static float currentQps = 0.0f;
+static float currentBps = 0.0f;
+static float peakQps = 0.0f;
+static float peakBps = 0.0f;
 
 // Touch tracking (CST816S)
 static bool hasTouch = false;
@@ -158,13 +167,19 @@ uint32_t getSleepTimeout() {
     return sleepTimeoutSec;
 }
 
-void recordQueryActivity(bool blocked) {
+void recordQueryActivity(bool blocked, uint16_t bytes) {
+    if (bytes == 0) bytes = 64;
+    secQueries++;
+    secBytes += bytes;
     if (blocked) {
-        if (histBlocked[histIdx] < 65535) histBlocked[histIdx]++;
-    } else {
-        if (histAllowed[histIdx] < 65535) histAllowed[histIdx]++;
+        secBlocked++;
     }
 }
+
+float getCurrentQPS() { return currentQps; }
+float getCurrentBPS() { return currentBps; }
+float getPeakQPS() { return peakQps; }
+float getPeakBPS() { return peakBps; }
 
 void displayToast(const char* message, uint32_t durationMs) {
     toastMsg = message;
@@ -652,12 +667,24 @@ void updateDisplay(bool force) {
 
     if (screenAsleep) return;
 
-    // Roll query history slot every 10 seconds
-    if (millis() - lastHistRoll >= 10000UL) {
-        lastHistRoll = millis();
-        histIdx = (histIdx + 1) % HIST_SLOTS;
-        histBlocked[histIdx] = 0;
-        histAllowed[histIdx] = 0;
+    // 1-second high-resolution traffic rate calculation & rolling waveform
+    uint32_t nowMs = millis();
+    if (nowMs - lastSecCalc >= 1000UL) {
+        float dt = (float)(nowMs - lastSecCalc) / 1000.0f;
+        lastSecCalc = nowMs;
+
+        currentQps = (float)secQueries / dt;
+        currentBps = (float)secBytes / dt;
+        if (currentQps > peakQps) peakQps = currentQps;
+        if (currentBps > peakBps) peakBps = currentBps;
+
+        waveIdx = (waveIdx + 1) % WAVE_SLOTS;
+        waveTotal[waveIdx] = (uint16_t)(currentQps + 0.5f);
+        waveBlocked[waveIdx] = (uint16_t)((float)secBlocked / dt + 0.5f);
+
+        secQueries = 0;
+        secBlocked = 0;
+        secBytes = 0;
     }
 
     static uint32_t lastRender = 0;
@@ -841,6 +868,12 @@ static void drawPageOverview() {
     snprintf(aStr, sizeof(aStr), "Allowed: %lu", totalAllowed);
     spr.drawString(aStr, cardX2 + 12, cardY + 92, 1);
 
+    spr.setTextDatum(TR_DATUM);
+    spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+    char rStr[32];
+    snprintf(rStr, sizeof(rStr), "Rate: %.1f q/s", currentQps);
+    spr.drawString(rStr, cardX2 + cardW - 12, cardY + 92, 1);
+
     // --- Card 3: Network Clients ---
     spr.fillRoundRect(cardX3, cardY, cardW, cardH, 10, COLOR_CARD);
     spr.drawRoundRect(cardX3, cardY, cardW, cardH, 10, COLOR_CARD_BORDER);
@@ -867,55 +900,163 @@ static void drawPageOverview() {
 }
 
 static void drawPageActivity() {
-    drawHeader("REAL-TIME DNS ACTIVITY", COLOR_CYAN);
+    drawHeader("REAL-TIME TRAFFIC & SPEED", COLOR_CYAN);
 
-    // Graph Area Box (y: 36 to 166, h: 130)
-    int graphX = 14;
-    int graphY = 36;
-    int graphW = SCREEN_W - 28;
-    int graphH = 128;
+    // ==================== TOP: 3 Live Speed Cards (y: 34 to 88, h: 54) ====================
+    int cardY = 34;
+    int cardH = 54;
+    int cardW = 164;
+    int gap = 10;
+    int c1X = 12;
+    int c2X = c1X + cardW + gap; // 186
+    int c3X = c2X + cardW + gap; // 360
 
-    spr.fillRoundRect(graphX, graphY, graphW, graphH, 10, COLOR_CARD);
-    spr.drawRoundRect(graphX, graphY, graphW, graphH, 10, COLOR_CARD_BORDER);
+    // --- Card 1: Current Query & Transfer Speed ---
+    spr.fillRoundRect(c1X, cardY, cardW, cardH, 8, COLOR_CARD);
+    spr.drawRoundRect(c1X, cardY, cardW, cardH, 8, COLOR_CARD_BORDER);
+    spr.drawFastHLine(c1X + 8, cardY + 2, cardW - 16, COLOR_CYAN);
 
-    // Title inside graph
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    spr.drawString("TRAFFIC HISTOGRAM (LAST 4 MINUTES)", graphX + 12, graphY + 10, 1);
+    spr.drawString("CURRENT SPEED", c1X + 10, cardY + 8, 1);
+
+    spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+    char qpsStr[24];
+    snprintf(qpsStr, sizeof(qpsStr), "%.1f", currentQps);
+    spr.drawString(qpsStr, c1X + 10, cardY + 22, 4);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+    spr.drawString("q/s", c1X + 82, cardY + 28, 2);
+
+    spr.setTextDatum(TR_DATUM);
+    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+    char bwStr[32];
+    snprintf(bwStr, sizeof(bwStr), "%.1f KB/s", currentBps / 1024.0f);
+    spr.drawString(bwStr, c1X + cardW - 10, cardY + 36, 1);
+
+    // --- Card 2: Peak Records ---
+    spr.fillRoundRect(c2X, cardY, cardW, cardH, 8, COLOR_CARD);
+    spr.drawRoundRect(c2X, cardY, cardW, cardH, 8, COLOR_CARD_BORDER);
+    spr.drawFastHLine(c2X + 8, cardY + 2, cardW - 16, COLOR_AMBER);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    spr.drawString("PEAK SPEED", c2X + 10, cardY + 8, 1);
+
+    spr.setTextColor(COLOR_AMBER, COLOR_CARD);
+    char peakQpsStr[24];
+    snprintf(peakQpsStr, sizeof(peakQpsStr), "%.1f", peakQps);
+    spr.drawString(peakQpsStr, c2X + 10, cardY + 22, 4);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_AMBER, COLOR_CARD);
+    spr.drawString("q/s", c2X + 82, cardY + 28, 2);
+
+    spr.setTextDatum(TR_DATUM);
+    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+    char peakBwStr[32];
+    snprintf(peakBwStr, sizeof(peakBwStr), "Peak: %.1f KB/s", peakBps / 1024.0f);
+    spr.drawString(peakBwStr, c2X + cardW - 10, cardY + 36, 1);
+
+    // --- Card 3: Block Speed & Ratio ---
+    spr.fillRoundRect(c3X, cardY, cardW, cardH, 8, COLOR_CARD);
+    spr.drawRoundRect(c3X, cardY, cardW, cardH, 8, COLOR_CARD_BORDER);
+    spr.drawFastHLine(c3X + 8, cardY + 2, cardW - 16, COLOR_RED);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    spr.drawString("BLOCK SHIELD", c3X + 10, cardY + 8, 1);
+
+    uint32_t totalQueries = totalBlocked + totalAllowed;
+    float blockRate = (totalQueries > 0) ? ((float)totalBlocked * 100.0f / totalQueries) : 0.0f;
+
+    spr.setTextColor(COLOR_RED, COLOR_CARD);
+    char blkRateStr[24];
+    snprintf(blkRateStr, sizeof(blkRateStr), "%.1f", blockRate);
+    spr.drawString(blkRateStr, c3X + 10, cardY + 22, 4);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_RED, COLOR_CARD);
+    spr.drawString("%", c3X + 82, cardY + 28, 2);
+
+    spr.setTextDatum(TR_DATUM);
+    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+    char blkTotalStr[32];
+    snprintf(blkTotalStr, sizeof(blkTotalStr), "Blocked: %lu", totalBlocked);
+    spr.drawString(blkTotalStr, c3X + cardW - 10, cardY + 36, 1);
+
+    // ==================== BOTTOM: 48-Second Oscillogram (y: 94 to 200, h: 106) ====================
+    int graphX = 12;
+    int graphY = 94;
+    int graphW = SCREEN_W - 24; // 512
+    int graphH = 106;
+
+    spr.fillRoundRect(graphX, graphY, graphW, graphH, 8, COLOR_CARD);
+    spr.drawRoundRect(graphX, graphY, graphW, graphH, 8, COLOR_CARD_BORDER);
+
+    // Header inside Oscillogram panel
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(0x5AEB, COLOR_CARD); // Tech Cyan
+    spr.drawString("• 48-SEC REAL-TIME TRAFFIC OSCILLOGRAM (1-SEC/DIV)", graphX + 10, graphY + 8, 1);
 
     // Legend
-    spr.fillCircle(graphX + graphW - 130, graphY + 14, 4, COLOR_RED);
-    spr.drawString("Blocked", graphX + graphW - 120, graphY + 10, 1);
-    spr.fillCircle(graphX + graphW - 65, graphY + 14, 4, COLOR_GREEN);
-    spr.drawString("Allowed", graphX + graphW - 55, graphY + 10, 1);
+    spr.setTextDatum(TR_DATUM);
+    spr.fillCircle(graphX + graphW - 180, graphY + 12, 3, COLOR_GREEN);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    spr.drawString("Pass", graphX + graphW - 152, graphY + 8, 1);
 
-    // Find maximum count for scaling
-    uint16_t maxCount = 10;
-    for (int i = 0; i < HIST_SLOTS; i++) {
-        uint16_t tot = histBlocked[i] + histAllowed[i];
-        if (tot > maxCount) maxCount = tot;
+    spr.fillCircle(graphX + graphW - 140, graphY + 12, 3, COLOR_RED);
+    spr.drawString("Block", graphX + graphW - 110, graphY + 8, 1);
+
+    spr.drawFastHLine(graphX + graphW - 95, graphY + 12, 10, COLOR_CYAN);
+    spr.drawString("QPS", graphX + graphW - 65, graphY + 8, 1);
+
+    // Live blinking indicator
+    bool livePulse = ((millis() / 500) % 2) == 0;
+    spr.fillCircle(graphX + graphW - 48, graphY + 12, 3, livePulse ? COLOR_GREEN : 0x03E0);
+    spr.setTextColor(livePulse ? COLOR_GREEN : COLOR_DARKGRAY, COLOR_CARD);
+    spr.drawString("LIVE", graphX + graphW - 10, graphY + 8, 1);
+
+    // Determine dynamic maximum QPS in 48-second window
+    uint16_t maxQ = 6; // minimum scale
+    for (int i = 0; i < WAVE_SLOTS; i++) {
+        if (waveTotal[i] > maxQ) maxQ = waveTotal[i];
     }
 
-    // Grid baseline
-    int baseLineY = graphY + graphH - 22;
+    // Grid baseline & horizontal dividers
+    int baseLineY = graphY + 82; // Y: 176
+    int maxWaveH = 50;           // maximum bar height up to Y: 126
     spr.drawFastHLine(graphX + 10, baseLineY, graphW - 20, COLOR_DARKGRAY);
+    spr.drawFastHLine(graphX + 10, baseLineY - maxWaveH / 2, graphW - 20, 0x1925);
+    spr.drawFastHLine(graphX + 10, baseLineY - maxWaveH, graphW - 20, 0x1925);
 
-    // Draw Histogram Bars
-    int barSlotW = (graphW - 30) / HIST_SLOTS;
-    int barW = barSlotW - 4;
-    int maxBarH = graphH - 52;
+    // Max scale label
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(0x5AEB, COLOR_CARD);
+    char scaleStr[16];
+    snprintf(scaleStr, sizeof(scaleStr), "%uq", maxQ);
+    spr.drawString(scaleStr, graphX + 12, baseLineY - maxWaveH - 4, 1);
 
-    for (int i = 0; i < HIST_SLOTS; i++) {
-        int slot = (histIdx + 1 + i) % HIST_SLOTS;
-        uint16_t blk = histBlocked[slot];
-        uint16_t alw = histAllowed[slot];
-        uint16_t tot = blk + alw;
+    // Draw 48 Bars & Trend Line
+    int startX = graphX + 16; // 28
+    int barW = 7;
+    int prevX = -1;
+    int prevY = -1;
 
-        int totalH = (int)((float)tot / maxCount * maxBarH);
-        int blockedH = (int)((float)blk / maxCount * maxBarH);
+    for (int i = 0; i < WAVE_SLOTS; i++) {
+        int slot = (waveIdx + 1 + i) % WAVE_SLOTS;
+        uint16_t tot = waveTotal[slot];
+        uint16_t blk = waveBlocked[slot];
+        uint16_t alw = (tot >= blk) ? (tot - blk) : 0;
+
+        int totalH = (int)((float)tot / maxQ * maxWaveH);
+        int blockedH = (int)((float)blk / maxQ * maxWaveH);
         int allowedH = totalH - blockedH;
 
-        int bx = graphX + 16 + (i * barSlotW);
+        int bx = startX + i * 10;
+        int py = baseLineY - totalH;
+        int px = bx + 3;
 
         if (totalH > 0) {
             // Allowed portion (Green)
@@ -927,26 +1068,33 @@ static void drawPageActivity() {
                 spr.fillRect(bx, baseLineY - totalH, barW, blockedH, COLOR_RED);
             }
         } else {
-            // Idle dot
-            spr.drawFastHLine(bx, baseLineY, barW, COLOR_DARKGRAY);
+            // Idle dot at baseline
+            spr.drawFastHLine(bx, baseLineY, barW, 0x2124);
+        }
+
+        // Cyan trend line connecting top of wave
+        if (prevX >= 0) {
+            spr.drawLine(prevX, prevY, px, py, COLOR_CYAN);
+        }
+        prevX = px;
+        prevY = py;
+
+        // Current / Latest Slot glowing marker
+        if (i == WAVE_SLOTS - 1) {
+            spr.fillCircle(px, py, 3, COLOR_WHITE);
+            spr.drawCircle(px, py, 5, COLOR_CYAN);
         }
     }
 
-    // Scale label
-    spr.setTextDatum(BR_DATUM);
-    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    char scaleStr[16];
-    snprintf(scaleStr, sizeof(scaleStr), "Max %uq", maxCount);
-    spr.drawString(scaleStr, graphX + graphW - 12, baseLineY - 2, 1);
+    // Time axis ticks (-45s, -30s, -15s, NOW)
+    spr.setTextDatum(TC_DATUM);
+    spr.setTextColor(COLOR_DARKGRAY, COLOR_CARD);
+    spr.drawString("-45s", startX + 3 * 10, baseLineY + 4, 1);
+    spr.drawString("-30s", startX + 18 * 10, baseLineY + 4, 1);
+    spr.drawString("-15s", startX + 33 * 10, baseLineY + 4, 1);
 
-    // Bottom Summary Banner (y: 172 to 200)
-    spr.fillRoundRect(14, 172, SCREEN_W - 28, 28, 6, COLOR_CARD);
-    spr.setTextDatum(ML_DATUM);
-    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
-    char statSummary[64];
-    snprintf(statSummary, sizeof(statSummary), "Total: %lu queries   |   Blocked: %lu   |   Allowed: %lu",
-             totalBlocked + totalAllowed, totalBlocked, totalAllowed);
-    spr.drawString(statSummary, 24, 186, 2);
+    spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+    spr.drawString("NOW (0s)", startX + (WAVE_SLOTS - 1) * 10, baseLineY + 4, 1);
 
     drawFooter();
 }
@@ -1409,8 +1557,8 @@ static void drawPageCyberSentinel() {
 
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    char subStr[48];
-    snprintf(subStr, sizeof(subStr), "Clients: %d | Up: %s | %u Rules", numClients, upstreamName.c_str(), numHashes);
+    char subStr[64];
+    snprintf(subStr, sizeof(subStr), "Rate: %.1f q/s (%.1f KB/s) | Peak: %.1f", currentQps, currentBps / 1024.0f, peakQps);
     spr.drawString(subStr, cardX + 12, cardY2 + 58, 1);
 
     drawFooter();

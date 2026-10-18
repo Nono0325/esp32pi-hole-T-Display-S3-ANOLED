@@ -87,6 +87,9 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
     <div class=card><div class="v b" id=v_blocked>0</div><div class=l>已攔截廣告</div></div>
     <div class=card><div class="v a" id=v_allowed>0</div><div class=l>已允許查詢</div></div>
     <div class=card><div class=v id=v_rate>0.0%</div><div class=l>廣告攔截率</div></div>
+    <div class=card><div class=v id=v_qps style="color:#00ffff">0.0 <span style="font-size:12px;color:#8b949e">q/s</span></div><div class=l>即時查詢速率</div></div>
+    <div class=card><div class=v id=v_bps style="color:#3fb950">0.0 <span style="font-size:12px;color:#8b949e">KB/s</span></div><div class=l>即時傳輸頻寬</div></div>
+    <div class=card><div class=v id=v_peak style="color:#e3b341">0.0 <span style="font-size:12px;color:#8b949e">q/s</span></div><div class=l>歷史峰值速率</div></div>
     <div class=card><div class=v id=v_ping style="color:#58a6ff">-- ms</div><div class=l>外網連線延遲</div></div>
     <div class=card><div class=v id=v_domains>0</div><div class=l>規則庫網域數</div></div>
     <div class=card><div class=v id=v_clients>0</div><div class=l>已連線設備</div></div>
@@ -504,6 +507,12 @@ async function load(){
     v_heap.textContent=Math.round(s.heap/1024)+' KB';
     v_psram.textContent=Math.round((s.psram||0)/1024)+' KB';
     v_uptime.textContent=s.uptime;
+    if(window.v_qps) v_qps.innerHTML = (s.qps !== undefined ? s.qps.toFixed(1) : '0.0') + ' <span style="font-size:12px;color:#8b949e">q/s</span>';
+    if(window.v_bps) {
+      let kb = (s.bps !== undefined ? (s.bps / 1024.0).toFixed(1) : '0.0');
+      v_bps.innerHTML = kb + ' <span style="font-size:12px;color:#8b949e">KB/s</span>';
+    }
+    if(window.v_peak) v_peak.innerHTML = (s.peak_qps !== undefined ? s.peak_qps.toFixed(1) : '0.0') + ' <span style="font-size:12px;color:#8b949e">q/s</span>';
 
     // Ping Sentinel WAN Latency & Alert
     if(s.netOnline !== undefined && window.v_ping){
