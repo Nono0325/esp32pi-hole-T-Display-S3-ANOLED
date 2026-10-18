@@ -60,6 +60,17 @@ h2{font-size:14px;color:#8b949e;margin:18px 0 8px}
 <h2>FIRMWARE &mdash; OTA UPDATE</h2>
 <form id=fwf style="margin-bottom:6px"><input type=file id=fwb accept=.bin><button>Flash firmware</button> <span id=fwmsg style="color:#8b949e"></span></form>
 <div style="color:#8b949e;font-size:12px;margin-bottom:18px">upload <code>.pio/build/t-display-s3-amoled/firmware.bin</code> &mdash; device verifies it and reboots into it</div>
+<h2>ADMIN &amp; PASSWORD</h2>
+<div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px;margin-bottom:18px">
+  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px">
+    <input id=newuser placeholder="Username (default: admin)" size=18>
+    <input type=password id=curpass placeholder="Current password" size=18>
+    <input type=password id=newpass placeholder="New password (min 4)" size=18>
+    <button onclick="changePassword()" style="background:#238636;color:#fff;border-color:#2ea043">Save Password</button>
+  </div>
+  <div id=pwdmsg style="font-size:13px;min-height:18px;color:#8b949e"></div>
+  <div style="color:#8b949e;font-size:12px;margin-top:4px">Credentials are stored in ESP32 flash memory for dashboard control and OTA firmware updates.</div>
+</div>
 <h2>WIFI</h2>
 <div style="margin-bottom:18px"><button onclick="if(confirm('Forget saved WiFi and reboot into the setup portal?'))forgetWifi()">Forget WiFi</button></div>
 </div><script>
@@ -75,6 +86,7 @@ try{
 let res=await fetch('/stats.json');if(!res.ok)throw 0;let s=await res.json();
 if(host.textContent!=='@ '+s.ip)host.textContent='@ '+s.ip;
 credwarn.style.display=s.defcreds?'block':'none';
+if(s.webuser&&document.activeElement!=newuser&&!newuser.value)newuser.value=s.webuser;
 let on=s.blocking!==false;blockstate.dataset.on=on?'1':'0';
 let dot=on?'🛡️':'⏸️';if(blockdot.textContent!==dot)blockdot.textContent=dot;
 blockbar.style.borderColor=on?'#30363d':'#f0883e';
@@ -112,6 +124,32 @@ if(document.activeElement!=uurl)uurl.value=s.upurl||'';
 if(document.activeElement!=uiv)uiv.value=s.upiv||24;
 if(ustat.textContent!==(s.upstat||'—'))ustat.textContent=s.upstat||'—';
 }catch(_){}finally{inFlight=false;}
+}
+async function changePassword(){
+let u=newuser.value.trim(), c=curpass.value, p=newpass.value;
+if(!p || p.length < 4){ alert('新密碼長度至少需 4 個字元 (Password must be at least 4 characters)'); return; }
+pwdmsg.style.color='#8b949e';
+pwdmsg.textContent='Updating password...';
+try {
+let r = await fetch('/setpassword?newpass=' + encodeURIComponent(p) + '&curpass=' + encodeURIComponent(c) + (u ? ('&newuser=' + encodeURIComponent(u)) : ''), {
+method: 'POST',
+headers: CSRF_HDRS
+});
+if(r.ok) {
+pwdmsg.style.color='#3fb950';
+pwdmsg.textContent='✓ 密碼修改成功！';
+curpass.value='';
+newpass.value='';
+setTimeout(()=>{ alert('密碼修改成功！日後請使用新密碼進行管理與更新。'); }, 50);
+} else {
+pwdmsg.style.color='#f85149';
+let err = await r.text();
+pwdmsg.textContent='✗ 修改失敗: ' + err;
+}
+} catch(e) {
+pwdmsg.style.color='#f85149';
+pwdmsg.textContent='✗ 請求失敗，請檢查網路連線';
+}
 }
 function addDom(){let d=dom.value.trim();if(d){fetch('/addblock?d='+encodeURIComponent(d),{headers:CSRF_HDRS}).then(()=>{dom.value='';load()})}}
 ct.addEventListener('click',e=>{if(e.target.classList.contains('ban'))fetch('/ban?ip='+e.target.dataset.ip,{headers:CSRF_HDRS}).then(load)});

@@ -317,11 +317,51 @@ static String htmlEscape(const String& s) {
   return o;
 }
 
+// ---------- Admin credentials management (persisted in NVS) ----------
+static String currentWebUser = WEB_USER;
+static String currentWebPass = WEB_PASS;
+
+static void loadAuthCreds() {
+  prefs.begin("auth", true);
+  String u = prefs.getString("user", "");
+  String p = prefs.getString("pass", "");
+  prefs.end();
+  if (u.length() > 0) currentWebUser = u;
+  if (p.length() > 0) currentWebPass = p;
+  Serial.printf("[auth] user: %s (password: %s)\n", currentWebUser.c_str(),
+                (currentWebPass == "admin123" || currentWebPass == "CHANGE_ME_WEB_PASSWORD") ? "default" : "custom");
+}
+
+static bool saveAuthCreds(const String& newPass, const String& newUser = "") {
+  if (newPass.length() < 4) return false;
+  prefs.begin("auth", false);
+  if (newUser.length() > 0) {
+    prefs.putString("user", newUser);
+    currentWebUser = newUser;
+  }
+  prefs.putString("pass", newPass);
+  currentWebPass = newPass;
+  prefs.end();
+  ArduinoOTA.setPassword(currentWebPass.c_str());
+  return true;
+}
+
+static void resetAuthCreds() {
+  prefs.begin("auth", false);
+  prefs.clear();
+  prefs.end();
+  currentWebUser = WEB_USER;
+  currentWebPass = WEB_PASS;
+  ArduinoOTA.setPassword(currentWebPass.c_str());
+  Serial.println("[auth] credentials reset to factory default");
+}
+
 #include "page.h"   // dashboard HTML (PROGMEM) — see issue #6
 
 static void handleStats() {
   uint32_t up = millis() / 1000;
   char ut[24]; snprintf(ut, sizeof(ut), "%lud %luh %lum", up/86400, (up%86400)/3600, (up%3600)/60);
+  bool isDef = (currentWebPass == "admin123" || currentWebPass == "CHANGE_ME_WEB_PASSWORD");
   String j = "{\"ip\":\"" + WiFi.localIP().toString() + "\",\"blocked\":" + totalBlocked + ",\"allowed\":" + totalAllowed +
              ",\"domains\":" + numHashes + ",\"rssi\":" + WiFi.RSSI() + ",\"temp\":" + String(temperatureRead(), 1) +
              ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getFreePsram() + ",\"uptime\":\"" + ut + "\"" +
@@ -329,7 +369,8 @@ static void handleStats() {
              ",\"blocking\":" + (blockingOn ? "true" : "false") +
              ",\"rot\":" + String(getCurrentRotation()) + ",\"imu\":\"" + String(getIMUName()) + "\"" +
              ",\"resumeIn\":" + (uint32_t)(!blockingOn && resumeAt ? (resumeAt - millis()) / 1000 : 0) +
-             ",\"defcreds\":" + ((strcmp(WEB_PASS, "CHANGE_ME_WEB_PASSWORD") == 0 || strcmp(OTA_PASS, "CHANGE_ME_OTA_PASSWORD") == 0) ? "true" : "false") +
+             ",\"defcreds\":" + (isDef ? "true" : "false") +
+             ",\"webuser\":\"" + jesc(currentWebUser) + "\"" +
              ",\"clients\":[";
   for (int i = 0; i < numClients; i++) { Dev& c = clients[i]; IPAddress ip(c.ip);
     j += (i ? "," : ""); j += "{\"ip\":\"" + ip.toString() + "\",\"mac\":\"" + macStr(c.mac) + "\",\"blocked\":" + c.blocked + ",\"allowed\":" + c.allowed + ",\"banned\":" + (c.banned?"true":"false") + "}"; }
@@ -338,27 +379,54 @@ static void handleStats() {
   j += "]}";
   web.send(200, "application/json", j);
 }
+
 // Upstream shipped every state-changing/OTA endpoint with zero authentication —
 // anyone on the LAN could reflash firmware or rewrite the blocklist. Gate them.
-//
-// Basic Auth alone isn't enough here: these are GET endpoints with side effects,
-// and browsers auto-attach cached Basic Auth credentials to *any* request to an
-// already-authenticated origin — including one triggered by a completely
-// unrelated page the victim's browser visits later (e.g. <img src="http://
-// c3adblock.local/forgetwifi">). That's CSRF, and it defeats the LAN-attacker
-// threat model entirely: the attacker doesn't need network access, just to get
-// the victim's browser to fire one request. A custom header can't be attached
-// by a plain <img>/<form> CSRF vector (only same-origin fetch() can set it, and
-// that's exactly what the dashboard's own JS does), so requiring one blocks the
-// drive-by case without needing TLS, cookies, or a token endpoint.
 static const char* CSRF_HEADER = "X-Requested-With";
 static const char* CSRF_VALUE  = "c3-adblock";
 static bool requireAuth() {
   if (web.header(CSRF_HEADER) != CSRF_VALUE) { web.send(403, "text/plain", "missing CSRF header"); return false; }
-  if (web.authenticate(WEB_USER, WEB_PASS)) return true;
+  if (web.authenticate(currentWebUser.c_str(), currentWebPass.c_str())) return true;
   web.requestAuthentication();
   return false;
 }
+
+static void handleSetPassword() {
+  if (web.header(CSRF_HEADER) != CSRF_VALUE) {
+    web.send(403, "text/plain", "missing CSRF header");
+    return;
+  }
+  bool authenticated = web.authenticate(currentWebUser.c_str(), currentWebPass.c_str());
+  if (!authenticated && web.hasArg("curpass")) {
+    if (web.arg("curpass") == currentWebPass) authenticated = true;
+  }
+  if (!authenticated) {
+    web.send(403, "text/plain", "Current password incorrect");
+    return;
+  }
+  String np = web.arg("newpass");
+  if (np.length() < 4) {
+    web.send(400, "text/plain", "Password must be at least 4 characters");
+    return;
+  }
+  if (np.length() > 64) {
+    web.send(400, "text/plain", "Password too long (max 64)");
+    return;
+  }
+  String nu = web.hasArg("newuser") ? web.arg("newuser") : "";
+  nu.trim();
+  if (nu.length() > 32) {
+    web.send(400, "text/plain", "Username too long (max 32)");
+    return;
+  }
+  if (saveAuthCreds(np, nu)) {
+    displayToast("PASSWORD UPDATED", 3000);
+    web.send(200, "text/plain", "ok");
+  } else {
+    web.send(500, "text/plain", "Failed to save password");
+  }
+}
+
 static void handleBan() {
   if (!requireAuth()) return;
   IPAddress ip; if (ip.fromString(web.arg("ip"))) { Dev* c = getClient((uint32_t)ip); if (c) { c->banned = !c->banned; saveBanned(); } }
@@ -402,7 +470,7 @@ static void handleUpload() {
   HTTPUpload& u = web.upload();
   switch (u.status) {
     case UPLOAD_FILE_START:
-      upAuthOk = web.header(CSRF_HEADER) == CSRF_VALUE && web.authenticate(WEB_USER, WEB_PASS);
+      upAuthOk = web.header(CSRF_HEADER) == CSRF_VALUE && web.authenticate(currentWebUser.c_str(), currentWebPass.c_str());
       if (!upAuthOk) { Serial.println("[ota] blocklist upload: auth/CSRF check failed"); break; }
       upOk = false; beginBlocklistSwap();
       upFile = LittleFS.open("/blocklist.new", "w");
@@ -476,7 +544,7 @@ static void handleFwUpdateDone() {
 static void handleFwUpload() {
   HTTPUpload& u = web.upload();
   if (u.status == UPLOAD_FILE_START) {
-    fwAuthOk = web.header(CSRF_HEADER) == CSRF_VALUE && web.authenticate(WEB_USER, WEB_PASS);
+    fwAuthOk = web.header(CSRF_HEADER) == CSRF_VALUE && web.authenticate(currentWebUser.c_str(), currentWebPass.c_str());
     if (!fwAuthOk) { Serial.println("[fw-ota] auth/CSRF check failed, rejecting flash"); return; }
     Serial.printf("[fw-ota] %s\n", u.filename.c_str());
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
@@ -586,7 +654,7 @@ void setup() {
   loadCustom(); loadBanned(); loadUpdateCfg();
   Serial.printf("custom: %d, banned: %d\n", numCustom, numBanned);
 
-  // Hold BOOT at power-on to wipe saved WiFi and force the setup portal.
+  // Hold BOOT at power-on to wipe saved WiFi and reset password
 #if CONFIG_IDF_TARGET_ESP32C3
   const int BOOT_PIN = 9;     // C3 BOOT button
 #else
@@ -594,17 +662,21 @@ void setup() {
 #endif
   pinMode(BOOT_PIN, INPUT_PULLUP);
   if (digitalRead(BOOT_PIN) == LOW) { delay(60);
-    if (digitalRead(BOOT_PIN) == LOW) { prefs.begin("wifi", false); prefs.clear(); prefs.end();
-      Serial.println("[setup] BOOT held -> cleared saved WiFi"); } }
+    if (digitalRead(BOOT_PIN) == LOW) {
+      prefs.begin("wifi", false); prefs.clear(); prefs.end();
+      resetAuthCreds();
+      Serial.println("[setup] BOOT held -> cleared saved WiFi and reset credentials");
+    }
+  }
+
+  loadAuthCreds();
 
   if (!connectWiFi()) startConfigPortal();   // portal blocks + reboots on save; returns only when connected
   Serial.printf("WiFi up: %s\n", WiFi.localIP().toString().c_str());
   if (MDNS.begin("c3adblock")) { MDNS.addService("http", "tcp", 80); Serial.println("dashboard: http://c3adblock.local"); }
 
-  if (strcmp(WEB_PASS, "CHANGE_ME_WEB_PASSWORD") == 0 || strcmp(OTA_PASS, "CHANGE_ME_OTA_PASSWORD") == 0)
-    Serial.println("[WARN] secrets.h still has placeholder WEB_PASS/OTA_PASS — those are public "
-                    "(they're in the repo's example file). Set real values before trusting this "
-                    "device on a network you don't fully control.");
+  if (currentWebPass == "CHANGE_ME_WEB_PASSWORD")
+    Serial.println("[WARN] placeholder WEB_PASS in use.");
 
   dnsServer.begin(DNS_PORT); upstreamCli.begin(0);
   { const char* hdrs[] = { CSRF_HEADER }; web.collectHeaders(hdrs, 1); }  // needed for requireAuth()'s CSRF check
@@ -622,6 +694,7 @@ void setup() {
   });
   web.on("/resume", []() { if (!requireAuth()) return; blockingOn = true; resumeAt = 0; displayToast("RESUMED (WEB)", 2500); web.send(200, "text/plain", "resumed"); });
   web.on("/flip", []() { if (!requireAuth()) return; flipScreen180(); web.send(200, "text/plain", "flipped"); });
+  web.on("/setpassword", HTTP_POST, handleSetPassword);
   web.on("/forgetwifi", []() { if (!requireAuth()) return; web.send(200, "text/plain", "cleared — rebooting into setup portal");
     prefs.begin("wifi", false); prefs.clear(); prefs.end(); delay(500); ESP.restart(); });
   web.on("/upload", HTTP_POST, handleUploadDone, handleUpload);      // blocklist OTA (auth inside handleUpload)
@@ -635,7 +708,7 @@ void setup() {
   });
   web.begin();
   ArduinoOTA.setHostname("c3adblock");   // pio run -t upload --upload-port c3adblock.local
-  ArduinoOTA.setPassword(OTA_PASS);      // network OTA was unauthenticated upstream
+  ArduinoOTA.setPassword(currentWebPass.c_str());
   ArduinoOTA.begin();
   Serial.println("DNS :53 + dashboard :80 + OTA up");
 }
