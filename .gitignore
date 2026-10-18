@@ -19,3 +19,6 @@ src/secrets.h
 *.bak
 __pycache__/
 *.pyc
+scratch/
+*.jsonl
+blocklist.bin

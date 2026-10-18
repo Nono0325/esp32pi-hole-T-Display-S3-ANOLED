@@ -72,7 +72,7 @@ static OneButton btn2(PIN_BUTTON_2, true); // User Key (GPIO 21)
 
 // Navigation & Brightness State
 uint8_t currentPage = 0;
-static const uint8_t MAX_PAGES = 6;
+static const uint8_t MAX_PAGES = 7;
 static uint8_t brightnessLevels[] = {255, 170, 75, 15};
 static uint8_t brightnessIndex = 1; // Default to 66% (170) to reduce AMOLED heat and power draw
 static bool screenAsleep = false;
@@ -104,6 +104,7 @@ static void drawPageClockWeather();
 static void drawPageTopBlocked();
 static void drawPageSystem();
 static void drawPageQR();
+static void drawPageCyberSentinel();
 static void drawHeader(const char* title, uint16_t titleColor);
 static void drawFooter();
 static void drawToast();
@@ -250,6 +251,289 @@ static void onBtn2LongPress() {
     displayToast(bStr, 2000);
 }
 
+// ==================== NonoWuW Custom Cyber Logo & Boot Animation ====================
+static void drawNonoWuWLogo(int cx, int cy, float scale, uint16_t glowColor, uint8_t expression = 0, bool drawFace = true) {
+    if (scale <= 0.05f) return;
+    int w = (int)(270 * scale);
+    int h = (int)(106 * scale);
+    int x = cx - w / 2;
+    int y = cy - h / 2;
+
+    // 1. Outer Deep Tech Shield with Neon Glow Rim
+    spr.fillRoundRect(x, y, w, h, (int)(18 * scale), 0x0842); // Deep techno carbon
+    spr.drawRoundRect(x, y, w, h, (int)(18 * scale), glowColor);
+    if (scale > 0.45f) {
+        spr.drawRoundRect(x + 2, y + 2, w - 4, h - 4, (int)(16 * scale), 0x1925);
+    }
+    if (scale > 0.75f) {
+        spr.drawRoundRect(x + 4, y + 4, w - 8, h - 8, (int)(14 * scale), 0x0A44);
+    }
+
+    // 2. Stylized Cyber Cat-Ears / Dual Quantum Antenna Fins
+    int earW = (int)(26 * scale);
+    int earH = (int)(20 * scale);
+    int ear1X = x + (int)(36 * scale);
+    int ear2X = x + w - (int)(36 * scale) - earW;
+
+    // Left Antenna Ear
+    spr.fillTriangle(ear1X, y, ear1X + earW / 2, y - earH, ear1X + earW, y, glowColor);
+    spr.fillTriangle(ear1X + 3, y, ear1X + earW / 2, y - earH + 4, ear1X + earW - 3, y, 0x0842);
+    // Left glowing tip node
+    spr.fillCircle(ear1X + earW / 2, y - earH, (int)(2 * scale) + 1, COLOR_WHITE);
+
+    // Right Antenna Ear
+    spr.fillTriangle(ear2X, y, ear2X + earW / 2, y - earH, ear2X + earW, y, glowColor);
+    spr.fillTriangle(ear2X + 3, y, ear2X + earW / 2, y - earH + 4, ear2X + earW - 3, y, 0x0842);
+    // Right glowing tip node
+    spr.fillCircle(ear2X + earW / 2, y - earH, (int)(2 * scale) + 1, COLOR_WHITE);
+
+    // Antenna signal pulse notches
+    if (scale >= 0.7f) {
+        spr.drawFastHLine(ear1X - 6, y - earH / 2, 4, glowColor);
+        spr.drawFastHLine(ear1X - 9, y - earH / 2 - 4, 5, glowColor);
+        spr.drawFastHLine(ear2X + earW + 2, y - earH / 2, 4, glowColor);
+        spr.drawFastHLine(ear2X + earW + 4, y - earH / 2 - 4, 5, glowColor);
+    }
+
+    // 3. High-Tech Corner Brackets & Crosshairs
+    if (scale >= 0.65f) {
+        int blen = (int)(8 * scale);
+        // Top-Left bracket
+        spr.drawFastHLine(x - 8, y + 6, blen, glowColor);
+        spr.drawFastVLine(x - 8, y + 6, blen, glowColor);
+        // Top-Right bracket
+        spr.drawFastHLine(x + w + 8 - blen, y + 6, blen, glowColor);
+        spr.drawFastVLine(x + w + 8, y + 6, blen, glowColor);
+        // Bottom-Left bracket
+        spr.drawFastHLine(x - 8, y + h - 6, blen, glowColor);
+        spr.drawFastVLine(x - 8, y + h - 6 - blen, blen, glowColor);
+        // Bottom-Right bracket
+        spr.drawFastHLine(x + w + 8 - blen, y + h - 6, blen, glowColor);
+        spr.drawFastVLine(x + w + 8, y + h - 6 - blen, blen, glowColor);
+
+        // Tech crosshairs
+        spr.drawFastHLine(x + 12, cy, 8, 0x2965);
+        spr.drawFastHLine(x + w - 20, cy, 8, 0x2965);
+    }
+
+    // 4. Logo Typography, Visor & Mascot Expression
+    if (drawFace && scale >= 0.65f) {
+        spr.setTextDatum(MC_DATUM);
+
+        // Top mini status line
+        spr.setTextColor(0x5AEB, 0x0842); // Muted cyber cyan
+        spr.drawString("• NONOWUW QUANTUM SHIELD •", cx, cy - (int)(36 * scale), 1);
+
+        // Bold Title: NonoWuW with 3D drop-shadow
+        spr.setTextColor(0x0126, 0x0842); // Deep drop shadow
+        spr.drawString("NonoWuW", cx + 2, cy - (int)(14 * scale), 4);
+        spr.setTextColor(COLOR_CYAN, 0x0842); // Primary electric cyan
+        spr.drawString("NonoWuW", cx, cy - (int)(16 * scale), 4);
+
+        // Subtitle badge: Glowing Visor Pill
+        int badgeW = (int)(200 * scale);
+        int badgeH = (int)(24 * scale);
+        int badgeX = cx - badgeW / 2;
+        int badgeY = cy + (int)(11 * scale);
+
+        spr.fillRoundRect(badgeX, badgeY, badgeW, badgeH, (int)(6 * scale) + 1, 0x10E4);
+        spr.drawRoundRect(badgeX, badgeY, badgeW, badgeH, (int)(6 * scale) + 1, glowColor);
+
+        // Mascot expressions
+        const char* faceStr = "( ✧ WuW ✧ )";
+        uint16_t faceColor = 0xD81F; // Neon magenta
+        if (expression == 1) {
+            faceStr = "( ★ ω ★ )";
+            faceColor = COLOR_AMBER;
+        } else if (expression == 2) {
+            faceStr = "( ✧ ω < )";
+            faceColor = COLOR_CYAN;
+        } else if (expression == 3) {
+            faceStr = "( ˘ ω ˘ )";
+            faceColor = COLOR_GREEN;
+        }
+
+        spr.setTextColor(faceColor, 0x10E4);
+        spr.drawString(faceStr, cx - (int)(46 * scale), badgeY + badgeH / 2, 2);
+
+        // Divider in badge
+        spr.drawFastVLine(cx + (int)(10 * scale), badgeY + 3, badgeH - 6, 0x31E7);
+
+        // Subtitle tag
+        spr.setTextColor(COLOR_GREEN, 0x10E4);
+        spr.drawString("AD-SHIELD", cx + (int)(54 * scale), badgeY + badgeH / 2, 2);
+    }
+}
+
+void playBootAnimation() {
+    int cx = SCREEN_W / 2;
+    int cy = 78;
+
+    // ===== Phase 1: Laser Scanline awakening (12 frames) =====
+    for (int i = 1; i <= 12; i++) {
+        spr.fillSprite(COLOR_BG);
+        int lineLen = (i * SCREEN_W) / 12;
+        int x0 = cx - lineLen / 2;
+
+        spr.drawFastHLine(x0, 120, lineLen, COLOR_CYAN);
+        spr.drawFastHLine(x0, 119, lineLen, 0xF81F);
+        if (lineLen > 40) {
+            spr.drawFastHLine(x0 + 20, 121, lineLen - 40, 0x07E0);
+        }
+
+        int vSpread = i * 8;
+        spr.drawFastHLine(cx - lineLen / 3, 120 - vSpread, (lineLen * 2) / 3, 0x1185);
+        spr.drawFastHLine(cx - lineLen / 3, 120 + vSpread, (lineLen * 2) / 3, 0x1185);
+
+        if (13 - i > 0) {
+            spr.fillCircle(cx, 120, 13 - i, COLOR_WHITE);
+        }
+
+        spr.setTextDatum(MC_DATUM);
+        spr.setTextColor(0x5AEB, COLOR_BG);
+        spr.drawString("INITIALIZING QUANTUM CORE...", cx, 205, 2);
+
+        lcd_PushColors(0, 0, SCREEN_W, SCREEN_H, (uint16_t*)spr.getPointer());
+        delay(18);
+    }
+
+    // ===== Phase 2: Matrix Digital Stream & Concentric Rings (14 frames) =====
+    const char* matrixTokens[] = {"0x7F", "DNS", "S3", "AMOLED", "NONO", "WUW", "120K", "ESP32", "SHIELD", "IPv6"};
+    for (int i = 1; i <= 14; i++) {
+        spr.fillSprite(COLOR_BG);
+
+        int r = (int)(20 + i * 9);
+        spr.drawCircle(cx, cy, r, (i % 2 == 0) ? 0x1A27 : 0x08A2);
+        if (r > 30) spr.drawCircle(cx, cy, r - 15, 0x1144);
+
+        spr.setTextDatum(MC_DATUM);
+        for (int col = 0; col < 8; col++) {
+            int colX = 40 + col * 65;
+            int tokenY = (col * 37 + i * 22) % 240;
+            spr.setTextColor((i % 2 == 0) ? COLOR_GREEN : 0x05E0, COLOR_BG);
+            spr.drawString(matrixTokens[(col + i) % 10], colX, tokenY, 1);
+        }
+
+        float scale = 0.25f + 0.45f * ((float)i / 14.0f);
+        uint16_t glow = (i % 2 == 0) ? COLOR_CYAN : 0xF81F;
+        drawNonoWuWLogo(cx, cy, scale, glow, 0, i >= 10);
+
+        spr.setTextDatum(MC_DATUM);
+        spr.setTextColor(COLOR_GRAY, COLOR_BG);
+        spr.drawString("CALIBRATING AMOLED 60FPS DISPLAY ENGINE...", cx, 198, 2);
+
+        lcd_PushColors(0, 0, SCREEN_W, SCREEN_H, (uint16_t*)spr.getPointer());
+        delay(22);
+    }
+
+    // ===== Phase 3: Holographic Logo Materialization & Visor Awakening (18 frames) =====
+    for (int i = 1; i <= 18; i++) {
+        spr.fillSprite(COLOR_BG);
+
+        float scale = 0.7f + 0.3f * ((float)i / 18.0f);
+        uint16_t glow = (i >= 15) ? COLOR_GREEN : ((i % 4 < 2) ? COLOR_CYAN : 0xF81F);
+        uint8_t expr = (i < 6) ? 3 : ((i < 12) ? 0 : 1);
+
+        int r = (int)(i * 12);
+        if (r < 220) spr.drawCircle(cx, cy, r, 0x1A47);
+
+        drawNonoWuWLogo(cx, cy, scale, glow, expr, true);
+
+        for (int p = 0; p < 6; p++) {
+            float ang = (float)p * 1.047f + (float)i * 0.15f;
+            int px = cx + (int)(cos(ang) * (140 + i * 4));
+            int py = cy + (int)(sin(ang) * (60 + i * 2));
+            if (px >= 2 && px < SCREEN_W - 2 && py >= 2 && py < SCREEN_H - 2) {
+                spr.fillCircle(px, py, 2, glow);
+            }
+        }
+
+        spr.setTextDatum(MC_DATUM);
+        spr.setTextColor(COLOR_CYAN, COLOR_BG);
+        spr.drawString("ARMING NONOWUW CYBER SENTINEL...", cx, 198, 2);
+
+        lcd_PushColors(0, 0, SCREEN_W, SCREEN_H, (uint16_t*)spr.getPointer());
+        delay(22);
+    }
+
+    // ===== Phase 4: Cyber Diagnostics & Smooth Loading Bar (36 frames) =====
+    int barW = 360;
+    int barH = 10;
+    int barX = cx - barW / 2;
+    int barY = 160;
+
+    const char* diagMsgs[] = {
+        ">> [01/05] XTENSA DUAL-CORE LX7 240MHz ... READY",
+        ">> [02/05] RM67162 AMOLED 536x240 QSPI ... 60FPS LOCKED",
+        ">> [03/05] 16MB FLASH + 8MB OPI PSRAM ... INITIALIZED",
+        ">> [04/05] QUANTUM DNS FILTER ... 120,000+ RULES LOADED",
+        ">> [05/05] PING SENTINEL WAN MONITOR ... SYSTEM ARMED",
+        ">> ★ WELCOME BACK, NONOWUW! CYBER SHIELD ONLINE (WuW) ★"
+    };
+
+    for (int f = 1; f <= 36; f++) {
+        spr.fillSprite(COLOR_BG);
+
+        uint16_t glow = (f >= 30) ? COLOR_GREEN : ((f % 6 < 3) ? COLOR_CYAN : 0xF81F);
+        uint8_t expr = (f >= 30) ? 1 : ((f % 10 < 5) ? 0 : 2);
+        drawNonoWuWLogo(cx, cy, 1.0f, glow, expr, true);
+
+        // Progress Bar Frame with tech accents
+        spr.drawRoundRect(barX - 2, barY - 2, barW + 4, barH + 4, 5, COLOR_CARD_BORDER);
+        spr.drawFastHLine(barX - 6, barY + barH / 2, 4, glow);
+        spr.drawFastHLine(barX + barW + 2, barY + barH / 2, 4, glow);
+
+        int fillW = (f * barW) / 36;
+        if (fillW > 0) {
+            uint16_t barFillColor = (f >= 30) ? COLOR_GREEN : COLOR_CYAN;
+            spr.fillRoundRect(barX, barY, fillW, barH, 3, barFillColor);
+            spr.drawFastHLine(barX, barY, fillW, COLOR_WHITE);
+
+            int tipX = barX + fillW - 1;
+            spr.fillCircle(tipX, barY + barH / 2, 4, COLOR_WHITE);
+            spr.drawCircle(tipX, barY + barH / 2, 6, barFillColor);
+        }
+
+        // Percentage
+        int pct = (f * 100) / 36;
+        char pctStr[16];
+        snprintf(pctStr, sizeof(pctStr), "%3d%%", pct);
+        spr.setTextDatum(ML_DATUM);
+        spr.setTextColor((f >= 30) ? COLOR_GREEN : COLOR_CYAN, COLOR_BG);
+        spr.drawString(pctStr, barX + barW + 12, barY + barH / 2, 2);
+
+        // Diagnostic Step Message
+        int stepIdx = (f * 5) / 36;
+        if (f >= 32) stepIdx = 5;
+        if (stepIdx > 5) stepIdx = 5;
+        spr.setTextDatum(MC_DATUM);
+        spr.setTextColor((stepIdx == 5) ? COLOR_GREEN : COLOR_GRAY, COLOR_BG);
+        spr.drawString(diagMsgs[stepIdx], cx, 195, 2);
+
+        spr.setTextColor(COLOR_DARKGRAY, COLOR_BG);
+        spr.drawString("LilyGO T-Display-S3 AMOLED  |  NonoWuW Exclusive Edition", cx, 224, 1);
+
+        lcd_PushColors(0, 0, SCREEN_W, SCREEN_H, (uint16_t*)spr.getPointer());
+        delay(24);
+    }
+
+    // ===== Phase 5: Quick Dissolve Flare (4 frames) =====
+    for (int i = 0; i < 4; i++) {
+        spr.fillSprite(COLOR_BG);
+        drawNonoWuWLogo(cx, cy, 1.0f, (i % 2 == 0) ? COLOR_WHITE : COLOR_GREEN, 1, true);
+        lcd_PushColors(0, 0, SCREEN_W, SCREEN_H, (uint16_t*)spr.getPointer());
+        delay(30);
+    }
+
+    delay(200);
+}
+
+void replayBootAnimation() {
+    Serial.println("[display] Replaying NonoWuW Cyber Boot Animation!");
+    playBootAnimation();
+    updateDisplay(true); // Restore dashboard immediately
+}
+
 void initDisplay() {
     // 1. Enable AMOLED Screen Power (GPIO 38 HIGH)
     pinMode(PIN_POWER_ON, OUTPUT);
@@ -267,6 +551,7 @@ void initDisplay() {
 
     // 4. Configure Buttons
     btn1.attachClick(onBtn1Click);
+    btn1.attachDoubleClick(replayBootAnimation); // Double-click Button 1 (BOOT) to replay Cyber Boot Animation!
     btn1.attachLongPressStart(onBtn1LongPress);
     btn2.attachClick(onBtn2Click);
     btn2.attachDoubleClick(flipScreen180); // Double-click Button 2 to flip 180 degrees
@@ -292,23 +577,8 @@ void initDisplay() {
     lastActivityMs = millis();
     Serial.printf("[display] Sleep timeout configured: %u sec\n", sleepTimeoutSec);
 
-    // 8. Draw Boot Splash Screen
-    spr.fillSprite(COLOR_BG);
-    spr.setTextDatum(MC_DATUM);
-
-    // Glowing logo shield
-    spr.fillRoundRect(SCREEN_W / 2 - 130, 40, 260, 90, 16, COLOR_CARD);
-    spr.drawRoundRect(SCREEN_W / 2 - 130, 40, 260, 90, 16, COLOR_CYAN);
-    spr.setTextColor(COLOR_CYAN, COLOR_CARD);
-    spr.drawString("PI-HOLE S3", SCREEN_W / 2, 70, 4);
-    spr.setTextColor(COLOR_GREEN, COLOR_CARD);
-    spr.drawString("AMOLED EDITION", SCREEN_W / 2, 102, 2);
-
-    spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString("Starting DNS Sinkhole & Web Server...", SCREEN_W / 2, 165, 2);
-    spr.drawString("LilyGO T-Display-S3 AMOLED", SCREEN_W / 2, 195, 2);
-
-    lcd_PushColors(0, 0, SCREEN_W, SCREEN_H, (uint16_t*)spr.getPointer());
+    // 8. Play NonoWuW Exclusive Boot Animation & Custom Logo
+    playBootAnimation();
 }
 
 static void checkTouch() {
@@ -397,12 +667,13 @@ void updateDisplay(bool force) {
     spr.fillSprite(COLOR_BG);
 
     switch (currentPage) {
-        case 0: drawPageOverview();     break;
-        case 1: drawPageActivity();     break;
-        case 2: drawPageClockWeather(); break;
-        case 3: drawPageTopBlocked();   break;
-        case 4: drawPageSystem();       break;
-        case 5: drawPageQR();           break;
+        case 0: drawPageOverview();      break;
+        case 1: drawPageActivity();      break;
+        case 2: drawPageClockWeather();  break;
+        case 3: drawPageTopBlocked();    break;
+        case 4: drawPageSystem();        break;
+        case 5: drawPageQR();            break;
+        case 6: drawPageCyberSentinel(); break;
     }
 
     drawToast();
@@ -445,12 +716,12 @@ static void drawFooter() {
     // Help prompts
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString("[KEY 1] Page (1-6)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
+    spr.drawString("[KEY 1] Page (1-7)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
 
-    // Page indicator dots (6 dots)
+    // Page indicator dots (7 dots)
     spr.setTextDatum(TR_DATUM);
     for (int i = 0; i < MAX_PAGES; i++) {
-        int dotX = SCREEN_W - 95 + (i * 14);
+        int dotX = SCREEN_W - 110 + (i * 14);
         if (i == currentPage) {
             spr.fillCircle(dotX, 222, 4, COLOR_CYAN);
         } else {
@@ -460,7 +731,7 @@ static void drawFooter() {
 }
 
 static void drawPageOverview() {
-    drawHeader("SHIELD OVERVIEW", COLOR_CYAN);
+    drawHeader("NonoWuW SHIELD", COLOR_CYAN);
 
     // ---- Status Banner (y: 34 to 68) ----
     uint16_t statusBg = blockingOn ? 0x0284 : 0x31E0;
@@ -472,7 +743,7 @@ static void drawPageOverview() {
     spr.setTextDatum(ML_DATUM);
     spr.setTextColor(statusText, statusBg);
     if (blockingOn) {
-        spr.drawString("SHIELD ACTIVE", 42, 50, 2);
+        spr.drawString("NonoWuW ACTIVE", 42, 50, 2);
     } else {
         if (resumeAt) {
             uint32_t rem = (resumeAt > millis()) ? (resumeAt - millis()) / 1000 : 0;
@@ -1011,4 +1282,136 @@ static void drawToast() {
         spr.setTextColor(COLOR_WHITE, 0x1925);
         spr.drawString(toastMsg, SCREEN_W / 2, ty + (toastH / 2), 2);
     }
+}
+
+static void drawPageCyberSentinel() {
+    drawHeader("NONOWUW CYBER SENTINEL", COLOR_CYAN);
+
+    uint32_t ms = millis();
+
+    // 1. Dynamic Breathing Glow Color
+    uint16_t glowColors[] = {COLOR_CYAN, 0xF81F, COLOR_GREEN, 0xFD20};
+    uint8_t colorIdx = (ms / 3000) % 4;
+    uint16_t activeGlow = glowColors[colorIdx];
+
+    // 2. Dynamic Mascot Expressions:
+    // ( ✧ WuW ✧ ) -> ( ★ ω ★ ) -> ( ✧ ω < ) -> ( ˘ ω ˘ )
+    uint8_t exprIdx = (ms / 4000) % 4;
+
+    // ==================== LEFT ZONE: NonoWuW Cyber Mascot Showcase ====================
+    int cx = 138;
+    int cy = 100;
+    float scale = 0.82f;
+
+    // Orbiting cyber energy particles around logo
+    float t = (float)(ms % 3000) / 3000.0f;
+    for (int p = 0; p < 4; p++) {
+        float angle = t * 6.28318f + (float)p * 1.57079f;
+        int px = cx + (int)(cos(angle) * 118.0f);
+        int py = cy + (int)(sin(angle) * 42.0f);
+        if (px >= 14 && px <= 262 && py >= 32 && py <= 156) {
+            spr.fillCircle(px, py, 2, activeGlow);
+        }
+    }
+
+    // Render NonoWuW Cyber Logo
+    drawNonoWuWLogo(cx, cy, scale, activeGlow, exprIdx, true);
+
+    // Status Pill Ribbon below Logo (y: 158 to 198)
+    int ribW = 236;
+    int ribH = 38;
+    int ribX = cx - ribW / 2; // 20
+    int ribY = 158;
+    spr.fillRoundRect(ribX, ribY, ribW, ribH, 8, COLOR_CARD);
+    spr.drawRoundRect(ribX, ribY, ribW, ribH, 8, COLOR_CARD_BORDER);
+
+    // Status LED indicator
+    bool blinkLed = ((ms / 500) % 2) == 0;
+    spr.fillCircle(ribX + 16, ribY + ribH / 2, 4, blinkLed ? COLOR_GREEN : 0x03E0);
+
+    spr.setTextDatum(ML_DATUM);
+    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+    spr.drawString("SENTINEL ARMED", ribX + 28, ribY + 12, 2);
+
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    spr.drawString("Quantum Core • Defense Active", ribX + 28, ribY + 27, 1);
+
+    // ==================== CENTER DIVIDER ====================
+    spr.drawFastVLine(268, 34, 166, COLOR_CARD_BORDER);
+    spr.drawFastVLine(268, 80, 74, activeGlow);
+    spr.drawCircle(268, 117, 3, activeGlow);
+
+    // ==================== RIGHT ZONE: Dual Telemetry Cards ====================
+    int cardX = 276;
+    int cardW = SCREEN_W - cardX - 12; // 248px
+    int cardH = 78;
+    int cardY1 = 34;
+    int cardY2 = 122;
+
+    uint32_t totalQueries = totalBlocked + totalAllowed;
+    float blockRate = (totalQueries > 0) ? ((float)totalBlocked * 100.0f / totalQueries) : 0.0f;
+
+    // --- Card 1: Defense & Blocking Metrics (y: 34 to 112) ---
+    spr.fillRoundRect(cardX, cardY1, cardW, cardH, 8, COLOR_CARD);
+    spr.drawRoundRect(cardX, cardY1, cardW, cardH, 8, COLOR_CARD_BORDER);
+    spr.drawFastHLine(cardX + 12, cardY1 + 2, cardW - 24, COLOR_RED);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    spr.drawString("BLOCKED ADS", cardX + 12, cardY1 + 10, 1);
+
+    spr.setTextColor(COLOR_RED, COLOR_CARD);
+    char bStr[24];
+    snprintf(bStr, sizeof(bStr), "%lu", totalBlocked);
+    spr.drawString(bStr, cardX + 12, cardY1 + 24, 4);
+
+    // Block rate pill badge
+    spr.fillRoundRect(cardX + cardW - 88, cardY1 + 24, 76, 22, 5, 0x3000);
+    spr.drawRoundRect(cardX + cardW - 88, cardY1 + 24, 76, 22, 5, COLOR_RED);
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(COLOR_RED, 0x3000);
+    char pctStr[16];
+    snprintf(pctStr, sizeof(pctStr), "%.1f%%", blockRate);
+    spr.drawString(pctStr, cardX + cardW - 50, cardY1 + 35, 2);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    char qStr[48];
+    snprintf(qStr, sizeof(qStr), "Total: %lu queries  (%lu ok)", totalQueries, totalAllowed);
+    spr.drawString(qStr, cardX + 12, cardY1 + 58, 1);
+
+    // --- Card 2: Quantum SoC & Hardware Health (y: 122 to 200) ---
+    spr.fillRoundRect(cardX, cardY2, cardW, cardH, 8, COLOR_CARD);
+    spr.drawRoundRect(cardX, cardY2, cardW, cardH, 8, COLOR_CARD_BORDER);
+    spr.drawFastHLine(cardX + 12, cardY2 + 2, cardW - 24, COLOR_CYAN);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    spr.drawString("QUANTUM HARDWARE", cardX + 12, cardY2 + 10, 1);
+
+    float temp = temperatureRead();
+    uint16_t tColor = (temp < 50.0f) ? COLOR_GREEN : (temp < 70.0f ? COLOR_AMBER : COLOR_RED);
+    spr.setTextColor(tColor, COLOR_CARD);
+    char tStr[24];
+    snprintf(tStr, sizeof(tStr), "CPU: %.1f C", temp);
+    spr.drawString(tStr, cardX + 12, cardY2 + 26, 2);
+
+    spr.setTextDatum(TL_DATUM);
+    char pStr[24];
+    if (netIsOnline && netRttMs >= 0) {
+        snprintf(pStr, sizeof(pStr), "WAN: %ldms", (long)netRttMs);
+        spr.setTextColor(COLOR_GREEN, COLOR_CARD);
+    } else {
+        snprintf(pStr, sizeof(pStr), "WAN: OFFLINE");
+        spr.setTextColor(COLOR_RED, COLOR_CARD);
+    }
+    spr.drawString(pStr, cardX + 130, cardY2 + 26, 2);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    char subStr[48];
+    snprintf(subStr, sizeof(subStr), "Clients: %d | Up: %s | %u Rules", numClients, upstreamName.c_str(), numHashes);
+    spr.drawString(subStr, cardX + 12, cardY2 + 58, 1);
+
+    drawFooter();
 }

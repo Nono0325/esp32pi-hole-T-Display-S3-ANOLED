@@ -1354,6 +1354,7 @@ void setup() {
   });
   web.on("/resume", []() { if (!requireAuth()) return; blockingOn = true; resumeAt = 0; displayToast("RESUMED (WEB)", 2500); web.send(200, "text/plain", "resumed"); });
   web.on("/flip", []() { if (!requireAuth()) return; flipScreen180(); web.send(200, "text/plain", "flipped"); });
+  web.on("/replayboot", []() { if (!requireAuth()) return; replayBootAnimation(); web.send(200, "text/plain", "replaying"); });
   web.on("/setpassword", HTTP_POST, handleSetPassword);
   web.on("/forgetwifi", []() { if (!requireAuth()) return; web.send(200, "text/plain", "cleared — rebooting into setup portal");
     prefs.begin("wifi", false); prefs.clear(); prefs.end(); delay(500); ESP.restart(); });

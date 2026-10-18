@@ -40,7 +40,17 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
 .section-desc{color:#8b949e;font-size:12px;margin-top:4px;margin-bottom:10px}
 </style></head><body>
 <header>
-  <h1>🛡️ T-Display-S3 AMOLED 廣告攔截器 <span id=host></span></h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <div style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;background:linear-gradient(135deg,#081b29,#1f1035);border:1px solid #00f0ff;border-radius:8px;box-shadow:0 0 12px rgba(0,240,255,0.35);font-size:18px">🛡️</div>
+    <div>
+      <h1 style="display:flex;align-items:center;gap:8px;font-size:17px">
+        <span style="color:#00f0ff;font-weight:800;letter-spacing:0.5px">NonoWuW</span>
+        <span style="color:#ffffff;font-size:15px;font-weight:600">CYBER SHIELD</span>
+        <span style="background:rgba(216,31,255,0.18);color:#d81fff;border:1px solid rgba(216,31,255,0.45);border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700">( ✧ WuW ✧ )</span>
+        <span id=host style="font-size:12px;color:#8b949e;font-weight:normal"></span>
+      </h1>
+    </div>
+  </div>
   <div id=wthr style="font-size:13px;color:#8b949e">🌤️ 台北: 讀取中...</div>
 </header>
 <div class=wrap>
@@ -216,15 +226,17 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
       <button onclick="setScreenPage(3)">第 3 頁: 攔截排行</button>
       <button onclick="setScreenPage(4)">第 4 頁: 硬體健康</button>
       <button onclick="setScreenPage(5)">第 5 頁: 掃碼連線</button>
+      <button onclick="setScreenPage(6)" style="border-color:#00f0ff;color:#00f0ff;font-weight:600">第 6 頁: ✧ WuW ✧ 賽博哨兵</button>
     </div>
 
-    <div style="font-weight:600;margin-bottom:8px">螢幕背光亮度</div>
+    <div style="font-weight:600;margin-bottom:8px">螢幕背光亮度與開機動畫</div>
     <div class="tool-row btn-grp">
       <button onclick="setBrightness(255)">☀️ 100% 全亮</button>
       <button onclick="setBrightness(170)">⛅ 66% 常用</button>
       <button onclick="setBrightness(75)">🌙 30% 微光</button>
       <button onclick="setBrightness(15)">🌑 5% 夜間低光</button>
-      <button onclick="flipScreen()" style="margin-left:12px">🔄 翻轉螢幕 180°</button>
+      <button onclick="flipScreen()" style="margin-left:8px">🔄 翻轉螢幕 180°</button>
+      <button onclick="replayBootAnim()" style="background:#8957e5;color:#fff;border-color:#a371f7;font-weight:600;margin-left:8px">🎬 重播 AMOLED 開機動畫</button>
     </div>
   </div>
 
@@ -343,6 +355,7 @@ if(window.location.hash === '#settings') switchTab('settings');
 
 function togglePause(){fetch(blockstate.dataset.on=='1'?'/pause?s='+pausedur.value:'/resume',{headers:CSRF_HDRS}).then(load);}
 function flipScreen(){fetch('/flip',{headers:CSRF_HDRS});}
+function replayBootAnim(){fetch('/replayboot',{headers:CSRF_HDRS}).then(()=>{alert('✨ 已觸發 T-Display-S3 AMOLED 賽博開機動畫重播！');});}
 function setScreenPage(p){fetch('/setpage?p='+p,{headers:CSRF_HDRS});}
 function setBrightness(b){fetch('/setbrightness?b='+b,{headers:CSRF_HDRS});}
 function sleepNow(){fetch('/sleep',{headers:CSRF_HDRS}).then(load);}
