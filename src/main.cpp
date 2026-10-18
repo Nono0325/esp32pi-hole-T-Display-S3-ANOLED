@@ -122,6 +122,20 @@ Preferences prefs;
 DNSServer   dnsPortal;
 String      portalOpts;             // <option> list of scanned networks, built once at portal start
 
+// Thermal & Power Management
+static uint32_t currentCpuFreq = 160;
+static bool wifiModemSleep = true;
+
+static void loadPowerCfg() {
+  prefs.begin("power", true);
+  currentCpuFreq = prefs.getUInt("cpu", 160);
+  wifiModemSleep = prefs.getBool("wsleep", true);
+  prefs.end();
+  setCpuFrequencyMhz(currentCpuFreq);
+  Serial.printf("[power] CPU Frequency set to %u MHz (Modem Sleep: %s)\n",
+                getCpuFrequencyMhz(), wifiModemSleep ? "ON" : "OFF");
+}
+
 // blocking pause (Pi-hole-style "disable for a while")
 bool     blockingOn = true;
 uint32_t resumeAt   = 0;            // millis() to auto-resume; 0 = paused indefinitely / not paused
@@ -627,6 +641,8 @@ static void handleStats() {
   j += ",\"curPage\":" + String(currentPage);
   j += ",\"screenAsleep\":" + String(isDisplaySleeping() ? "true" : "false");
   j += ",\"sleepTimeout\":" + String(getSleepTimeout());
+  j += ",\"cpufreq\":" + String(getCpuFrequencyMhz());
+  j += ",\"wifisleep\":" + String(wifiModemSleep ? "true" : "false");
   j += ",\"logs\":[";
   int outCount = (logCount > 35) ? 35 : logCount;
   for (int i = 0; i < outCount; i++) {
@@ -765,6 +781,31 @@ static void handleSetSleepTimeout() {
   if (!requireAuth()) return;
   uint32_t s = web.hasArg("s") ? web.arg("s").toInt() : 0;
   setSleepTimeout(s);
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleSetPower() {
+  if (!requireAuth()) return;
+  if (web.hasArg("cpu")) {
+    uint32_t f = web.arg("cpu").toInt();
+    if (f == 80 || f == 160 || f == 240) {
+      currentCpuFreq = f;
+      setCpuFrequencyMhz(f);
+      prefs.begin("power", false);
+      prefs.putUInt("cpu", f);
+      prefs.end();
+      Serial.printf("[power] CPU frequency changed to %u MHz\n", f);
+    }
+  }
+  if (web.hasArg("wsleep")) {
+    wifiModemSleep = (web.arg("wsleep") == "1" || web.arg("wsleep") == "true");
+    WiFi.setSleep(wifiModemSleep);
+    prefs.begin("power", false);
+    prefs.putBool("wsleep", wifiModemSleep);
+    prefs.end();
+    Serial.printf("[power] WiFi Modem Sleep set to %s\n", wifiModemSleep ? "ENABLED" : "DISABLED");
+  }
+  displayToast("POWER CFG UPDATED", 2500);
   web.send(200, "text/plain", "ok");
 }
 
@@ -913,10 +954,15 @@ static bool connectWiFi() {
   const char* pass = ss.length() ? pw.c_str() : WIFI_PASS;
   if (!ssid || !*ssid || strcmp(ssid, "YOUR_WIFI_SSID") == 0) return false;  // unconfigured
   Serial.printf("WiFi: connecting to \"%s\"%s\n", ssid, ss.length() ? " (provisioned)" : " (secrets.h)");
-  WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.begin(ssid, pass);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(wifiModemSleep); // Enable Modem Sleep: drops WiFi power draw by ~70% and drastically lowers temperature
+  WiFi.begin(ssid, pass);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 30000) { delay(250); Serial.print("."); }
   Serial.println();
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setSleep(wifiModemSleep);
+  }
   return WiFi.status() == WL_CONNECTED;
 }
 
@@ -977,6 +1023,7 @@ static void startConfigPortal() {
 
 void setup() {
   Serial.begin(115200); delay(300);
+  loadPowerCfg();
   initDisplay();
   Serial.println("\n[t-display-s3-adblock] booting");
   if (!LittleFS.begin(true)) Serial.println("LittleFS FAILED");
@@ -1034,6 +1081,7 @@ void setup() {
   web.on("/sleep", handleSleep);
   web.on("/wakeup", handleWakeup);
   web.on("/setsleep", handleSetSleepTimeout);
+  web.on("/setpower", handleSetPower);
   web.on("/setweather", []() {
     if (!requireAuth()) return;
     String c = web.hasArg("city") ? web.arg("city") : "台北 (Taipei)";
@@ -1101,5 +1149,8 @@ void loop() {
     }
   }
   updateDisplay();
-  if (!busy) delay(1);   // sleep only when idle: full speed under load, cool when quiet
+  if (!busy) {
+    // When display is sleeping, sleep 10ms for deep cooling; when awake, sleep 2ms for FreeRTOS idle yield
+    delay(isDisplaySleeping() ? 10 : 2);
+  }
 }

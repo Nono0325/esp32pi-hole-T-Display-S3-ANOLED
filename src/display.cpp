@@ -68,7 +68,7 @@ static OneButton btn2(PIN_BUTTON_2, true); // User Key (GPIO 21)
 uint8_t currentPage = 0;
 static const uint8_t MAX_PAGES = 6;
 static uint8_t brightnessLevels[] = {255, 170, 75, 15};
-static uint8_t brightnessIndex = 0;
+static uint8_t brightnessIndex = 1; // Default to 66% (170) to reduce AMOLED heat and power draw
 static bool screenAsleep = false;
 
 // Sleep Timeout & Activity State (persisted in NVS "disp")
@@ -110,6 +110,7 @@ void resetActivityTimer() {
 void sleepDisplay() {
     if (screenAsleep) return;
     screenAsleep = true;
+    lcd_setBrightness(0); // Cut backlight current to 0 immediately
     lcd_sleep();
     Serial.println("[display] AMOLED entered sleep mode (Display OFF & Sleep IN)");
 }
@@ -338,11 +339,13 @@ static void checkTouch() {
 }
 
 void updateDisplay(bool force) {
-    // Tick buttons, touch and gravity IMU
+    // Tick buttons and touch controller (hardware wakeup triggers)
     btn1.tick();
     btn2.tick();
     checkTouch();
-    updateIMU();
+    if (!screenAsleep) {
+        updateIMU(); // Skip I2C accelerometer polling when screen is sleeping to save power
+    }
 
     // Inactivity sleep check
     if (sleepTimeoutSec > 0 && !screenAsleep && (millis() - lastActivityMs >= sleepTimeoutSec * 1000UL)) {

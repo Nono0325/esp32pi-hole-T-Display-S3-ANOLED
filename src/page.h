@@ -266,6 +266,35 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
     </form>
     <div class=section-desc>上傳編譯後的 <code>.pio/build/t-display-s3-amoled/firmware.bin</code>，設備校驗完成後將自動重新開機。</div>
   </div>
+
+  <h2>❄️ 7. 效能與節能降溫管理 (Thermal & Power Management)</h2>
+  <div class=panel>
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <span style="font-weight:600">晶片核心溫度：</span>
+      <span id=thermaltag class=tag style="padding:6px 14px;border-radius:14px;font-size:13px;font-weight:600">-- °C</span>
+      <span style="color:#8b949e;font-size:13px">(正常運行溫度約 38~52°C)</span>
+    </div>
+
+    <div class="tool-row" style="margin-bottom:12px;gap:10px;align-items:center;flex-wrap:wrap">
+      <span>CPU 運行頻率：</span>
+      <select id=cpufreqsel style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:6px 10px;border-radius:6px">
+        <option value="80">80 MHz (極致低溫 — 發熱最低，推薦)</option>
+        <option value="160" selected>160 MHz (平衡模式 — 效能充沛且清涼，預設)</option>
+        <option value="240">240 MHz (全速 240MHz — 高效能但發熱較大)</option>
+      </select>
+
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-left:8px">
+        <input type=checkbox id=wifisleepchk checked>
+        <span>Wi-Fi 數據機省電 (Modem Sleep)</span>
+      </label>
+
+      <button onclick="savePowerConfig()" style="background:#238636;color:#fff;border-color:#2ea043;margin-left:8px">儲存降溫設定</button>
+    </div>
+
+    <div class=section-desc>
+      💡 <b>降溫指南</b>：ESP32-S3 雙核心預設全速 240MHz 運行且持續維持高頻 Wi-Fi 射頻時發熱量最大。切換至 <b>160 MHz 或 80 MHz</b> 並開啟 <b>Wi-Fi Modem Sleep</b>，可大幅降低功耗並使設備降溫 10~15°C，DNS 解析與畫面渲染完全零卡頓。
+    </div>
+  </div>
 </div>
 
 </div>
@@ -298,6 +327,17 @@ async function saveSleepTimeout(){
     let r=await fetch('/setsleep?s='+encodeURIComponent(s),{headers:CSRF_HDRS});
     if(r.ok){
       alert('已更新螢幕自動休眠設定！');
+      load();
+    }
+  }catch(_){}
+}
+async function savePowerConfig(){
+  let c = cpufreqsel.value;
+  let ws = wifisleepchk.checked ? 1 : 0;
+  try {
+    let r = await fetch('/setpower?cpu='+c+'&wsleep='+ws, {headers: CSRF_HDRS});
+    if(r.ok){
+      alert('已成功更新降溫與節能設定！');
       load();
     }
   }catch(_){}
@@ -454,6 +494,24 @@ async function load(){
     }
     if(s.sleepTimeout !== undefined && sleeptout && document.activeElement != sleeptout){
       sleeptout.value = s.sleepTimeout;
+    }
+
+    // Thermal & Power Management State
+    if(s.temp !== undefined && window.thermaltag){
+      let t = parseFloat(s.temp);
+      let color = '#3fb950', bg = '#142a1e', border = '#238636', desc = '清涼正常';
+      if(t >= 62){ color = '#f85149'; bg = '#3d1618'; border = '#da3633'; desc = '過熱警戒'; }
+      else if(t >= 53){ color = '#d29922'; bg = '#2c220f'; border = '#9e6a03'; desc = '偏熱微溫'; }
+      thermaltag.textContent = `🌡️ ${t.toFixed(1)} °C (${desc})`;
+      thermaltag.style.color = color;
+      thermaltag.style.background = bg;
+      thermaltag.style.borderColor = border;
+    }
+    if(s.cpufreq !== undefined && window.cpufreqsel && document.activeElement != cpufreqsel){
+      cpufreqsel.value = s.cpufreq;
+    }
+    if(s.wifisleep !== undefined && window.wifisleepchk && document.activeElement != wifisleepchk){
+      wifisleepchk.checked = (s.wifisleep === true);
     }
 
     // Clients Table (in-place update)
