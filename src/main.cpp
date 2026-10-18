@@ -24,26 +24,31 @@
 
 // ---- config ----
 #ifndef UPSTREAM_IP
-#define UPSTREAM_IP 9, 9, 9, 9                    // Quad9
+#define UPSTREAM_IP 9, 9, 9, 9                    // Quad9 default
 #endif
 #ifndef UPSTREAM_PORT
 #define UPSTREAM_PORT 53
 #endif
-static const IPAddress UPSTREAM(UPSTREAM_IP);
+
+// Dynamic Upstream DNS (persisted in NVS)
+IPAddress upstreamIP(UPSTREAM_IP);
+uint16_t upstreamPort = UPSTREAM_PORT;
+String upstreamName = "Quad9";
+
 static const uint16_t DNS_PORT = 53;
 static const char* BLOCKLIST_PATH = "/blocklist.bin";
 static const int HASH_BYTES = 5;
 static const uint64_t HASH_MASK = (1ULL << (HASH_BYTES * 8)) - 1;
 static const int INDEX_ENTRIES = 4096;   // 20 KB first-level flash index
 static const int CACHE_SIZE = 256;       // must be power of 2
-static const int MAX_RANGE = 256;        // max hashes per index bucket (fine up to ~1M hashes; flash holds far fewer)
+static const int MAX_RANGE = 256;        // max hashes per index bucket
 
 // ---- globals ----
 WiFiUDP dnsServer, upstreamCli;
 WebServer web(80);
 File blocklist;
 uint32_t numHashes = 0, totalBlocked = 0, totalAllowed = 0;
-uint8_t buf[1536];   // fits any non-fragmented UDP reply (EDNS answers can exceed 512)
+uint8_t buf[1536];
 
 // first-level flash index (sorted sample hashes) + small direct-mapped cache
 static uint8_t blIndex[INDEX_ENTRIES][HASH_BYTES];
@@ -59,14 +64,55 @@ Dev clients[MAX_CLIENTS]; int numClients = 0;
 static const int MAX_CUSTOM = 200;
 String customDom[MAX_CUSTOM]; uint64_t customHash[MAX_CUSTOM]; int numCustom = 0;
 
+// Allowlist / Whitelist (persisted in LittleFS /allowlist.txt)
+static const int MAX_ALLOW = 100;
+String allowDom[MAX_ALLOW];
+int numAllow = 0;
+
+// Live Query Log Ring Buffer (Last 50 queries)
+struct QueryLog {
+  char domain[64];
+  uint32_t clientIp;
+  bool blocked;
+  uint32_t timeSec;
+};
+static const int MAX_LOGS = 50;
+static QueryLog queryLogs[MAX_LOGS];
+static int logHead = 0;
+static int logCount = 0;
+
+// Top Blocked Domains Leaderboard
+struct TopDomain {
+  char domain[48];
+  uint32_t count;
+};
+TopDomain topBlocked[10];
+int numTopBlocked = 0;
+
+// Weather Data (Open-Meteo free API)
+#include <time.h>
+struct WeatherData {
+  float temp;
+  float feelsLike;
+  int humidity;
+  float windSpeed;
+  int weatherCode;
+  char conditionStr[24];
+  uint32_t lastUpdate;
+  bool valid;
+};
+WeatherData currentWeather = { 0, 0, 0, 0, 0, "Updating...", 0, false };
+static uint32_t lastWeatherFetch = 0;
+
 static const int MAX_BAN = 32;
 uint32_t bannedIP[MAX_BAN]; int numBanned = 0;
 
 // remote blocklist auto-update
-String updateUrl = "";              // URL of a prebuilt blocklist.bin (e.g. GitHub release asset)
-uint32_t updateIntervalH = 24;      // hours between auto-fetches
+String updateUrl = "";
+uint32_t updateIntervalH = 24;
 uint32_t lastCheckMs = 0;
 String updateStatus = "never";
+
 
 // WiFi provisioning (captive portal)
 Preferences prefs;
@@ -207,6 +253,149 @@ static void loadCustom() {
     }
   }
 }
+
+// ---------- allowlist (whitelist) ----------
+static void saveAllow() {
+  File f = LittleFS.open("/allowlist.txt", "w");
+  if (!f) return;
+  for (int i = 0; i < numAllow; i++) f.println(allowDom[i]);
+  f.close();
+}
+static bool isAllowedDomain(const char* domain) {
+  if (!domain || !*domain || numAllow == 0) return false;
+  size_t dl = strlen(domain);
+  for (int i = 0; i < numAllow; i++) {
+    const char* ad = allowDom[i].c_str();
+    size_t al = strlen(ad);
+    if (dl == al && strcasecmp(domain, ad) == 0) return true;
+    if (dl > al && domain[dl - al - 1] == '.' && strcasecmp(domain + (dl - al), ad) == 0) return true;
+  }
+  return false;
+}
+static bool addAllow(String d) {
+  d.trim(); d.toLowerCase(); if (d.startsWith("www.")) d = d.substring(4);
+  if (!d.length() || d.indexOf('.') < 0 || numAllow >= MAX_ALLOW) return false;
+  for (int i = 0; i < numAllow; i++) if (allowDom[i] == d) return false;
+  allowDom[numAllow++] = d;
+  saveAllow();
+  return true;
+}
+static void removeAllow(String d) {
+  d.toLowerCase();
+  for (int i = 0; i < numAllow; i++) if (allowDom[i] == d) {
+    for (int j = i; j < numAllow - 1; j++) allowDom[j] = allowDom[j+1];
+    numAllow--;
+    saveAllow();
+    return;
+  }
+}
+static void loadAllow() {
+  numAllow = 0;
+  File f = LittleFS.open("/allowlist.txt", "r");
+  if (f) {
+    while (f.available() && numAllow < MAX_ALLOW) {
+      String l = f.readStringUntil('\n'); l.trim(); l.toLowerCase();
+      if (l.length() && l.indexOf('.') > 0) {
+        allowDom[numAllow++] = l;
+      }
+    }
+    f.close();
+  }
+}
+
+// ---------- query logging & top blocked ----------
+static void recordQueryLog(const char* dom, uint32_t cip, bool blk) {
+  QueryLog& l = queryLogs[logHead];
+  strncpy(l.domain, dom, sizeof(l.domain) - 1);
+  l.domain[sizeof(l.domain) - 1] = 0;
+  l.clientIp = cip;
+  l.blocked = blk;
+  l.timeSec = millis() / 1000;
+  logHead = (logHead + 1) % MAX_LOGS;
+  if (logCount < MAX_LOGS) logCount++;
+}
+
+static void recordBlockedDomain(const char* dom) {
+  for (int i = 0; i < numTopBlocked; i++) {
+    if (strcasecmp(topBlocked[i].domain, dom) == 0) {
+      topBlocked[i].count++;
+      while (i > 0 && topBlocked[i].count > topBlocked[i - 1].count) {
+        TopDomain tmp = topBlocked[i];
+        topBlocked[i] = topBlocked[i - 1];
+        topBlocked[i - 1] = tmp;
+        i--;
+      }
+      return;
+    }
+  }
+  if (numTopBlocked < 10) {
+    strncpy(topBlocked[numTopBlocked].domain, dom, sizeof(topBlocked[0].domain) - 1);
+    topBlocked[numTopBlocked].domain[sizeof(topBlocked[0].domain) - 1] = 0;
+    topBlocked[numTopBlocked].count = 1;
+    numTopBlocked++;
+  }
+}
+
+// ---------- dynamic upstream DNS ----------
+static void loadUpstream() {
+  prefs.begin("dns", true);
+  String ipStr = prefs.getString("upip", "9.9.9.9");
+  upstreamPort = prefs.getUShort("upport", 53);
+  upstreamName = prefs.getString("upname", "Quad9");
+  prefs.end();
+  IPAddress ip;
+  if (ip.fromString(ipStr)) upstreamIP = ip;
+}
+static void saveUpstream(IPAddress ip, uint16_t port, String name) {
+  upstreamIP = ip;
+  upstreamPort = port;
+  upstreamName = name;
+  prefs.begin("dns", false);
+  prefs.putString("upip", ip.toString());
+  prefs.putUShort("upport", port);
+  prefs.putString("upname", name);
+  prefs.end();
+}
+
+// ---------- weather updater (Open-Meteo) ----------
+static void updateWeather() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  HTTPClient http;
+  http.setTimeout(7000);
+  http.begin("http://api.open-meteo.com/v1/forecast?latitude=25.033&longitude=121.565&current=temperature_2m,relative_humidity_2m,weather_code,apparent_temperature,wind_speed_10m");
+  int code = http.GET();
+  if (code == 200) {
+    String payload = http.getString();
+    int curIdx = payload.indexOf("\"current\":");
+    if (curIdx > 0) {
+      String curBlock = payload.substring(curIdx);
+      int idx = curBlock.indexOf("\"temperature_2m\":");
+      if (idx > 0) currentWeather.temp = curBlock.substring(idx + 17).toFloat();
+      idx = curBlock.indexOf("\"relative_humidity_2m\":");
+      if (idx > 0) currentWeather.humidity = curBlock.substring(idx + 23).toInt();
+      idx = curBlock.indexOf("\"apparent_temperature\":");
+      if (idx > 0) currentWeather.feelsLike = curBlock.substring(idx + 23).toFloat();
+      idx = curBlock.indexOf("\"wind_speed_10m\":");
+      if (idx > 0) currentWeather.windSpeed = curBlock.substring(idx + 17).toFloat();
+      idx = curBlock.indexOf("\"weather_code\":");
+      if (idx > 0) {
+        currentWeather.weatherCode = curBlock.substring(idx + 15).toInt();
+        int wc = currentWeather.weatherCode;
+        if (wc == 0) strcpy(currentWeather.conditionStr, "Clear Sky");
+        else if (wc >= 1 && wc <= 3) strcpy(currentWeather.conditionStr, "Partly Cloudy");
+        else if (wc == 45 || wc == 48) strcpy(currentWeather.conditionStr, "Foggy");
+        else if (wc >= 51 && wc <= 67) strcpy(currentWeather.conditionStr, "Rainy");
+        else if (wc >= 71 && wc <= 77) strcpy(currentWeather.conditionStr, "Snow");
+        else if (wc >= 80 && wc <= 82) strcpy(currentWeather.conditionStr, "Showers");
+        else if (wc >= 95) strcpy(currentWeather.conditionStr, "Thunderstorm");
+        else strcpy(currentWeather.conditionStr, "Overcast");
+      }
+      currentWeather.lastUpdate = millis();
+      currentWeather.valid = true;
+    }
+  }
+  http.end();
+}
 static bool isBannedIP(uint32_t ip) { for (int i = 0; i < numBanned; i++) if (bannedIP[i] == ip) return true; return false; }
 static void loadBanned() {
   numBanned = 0; File f = LittleFS.open("/banned.txt", "r"); if (!f) return;
@@ -268,12 +457,12 @@ static int forwardUpstream(int qlen, int qend) {
   const bool haveQ = ql > 0 && ql <= (int)sizeof(q) && qend <= qlen;
   if (haveQ) memcpy(q, buf + 12, ql);
   buf[0] = wid >> 8; buf[1] = wid & 0xFF;
-  upstreamCli.beginPacket(UPSTREAM, UPSTREAM_PORT); upstreamCli.write(buf, qlen); upstreamCli.endPacket();
+  upstreamCli.beginPacket(upstreamIP, upstreamPort); upstreamCli.write(buf, qlen); upstreamCli.endPacket();
   const uint32_t t0 = millis();
   while (millis() - t0 < 1000) {                         // deadline, not a retry count
     int sz = upstreamCli.parsePacket();
     if (sz <= 0) { delay(1); continue; }
-    const bool fromUp = upstreamCli.remoteIP() == UPSTREAM && upstreamCli.remotePort() == UPSTREAM_PORT;
+    const bool fromUp = upstreamCli.remoteIP() == upstreamIP && upstreamCli.remotePort() == upstreamPort;
     int n = upstreamCli.read(buf, sizeof(buf));
     upstreamCli.flush();                                 // oversized datagram can't strand rx_buffer
     if (!fromUp || n < 12 || sz > (int)sizeof(buf)) continue;
@@ -297,10 +486,22 @@ static bool handleDns() {
     size_t dl = parseQuery(buf, qlen, domain, &qtype, &qend);
     Dev* c = getClient((uint32_t)cip);
     bool ban = c && c->banned;
-    bool blocked = ban || (blockingOn && dl && (numHashes > 0 || numCustom > 0) && isBlocked(domain));
+    bool allowedByWhitelist = isAllowedDomain(domain);
+    bool blocked = !allowedByWhitelist && (ban || (blockingOn && dl && (numHashes > 0 || numCustom > 0) && isBlocked(domain)));
     int rlen;
-    if (blocked) { rlen = buildBlocked(qend, qtype); totalBlocked++; if (c) c->blocked++; recordQueryActivity(true); }
-    else         { rlen = forwardUpstream(qlen, qend);     totalAllowed++; if (c) c->allowed++; recordQueryActivity(false); }
+    if (blocked) {
+      rlen = buildBlocked(qend, qtype);
+      totalBlocked++;
+      if (c) c->blocked++;
+      recordQueryActivity(true);
+      recordBlockedDomain(domain);
+    } else {
+      rlen = forwardUpstream(qlen, qend);
+      totalAllowed++;
+      if (c) c->allowed++;
+      recordQueryActivity(false);
+    }
+    if (dl) recordQueryLog(domain, (uint32_t)cip, blocked);
     if (rlen > 0) { dnsServer.beginPacket(cip, cport); dnsServer.write(buf, rlen); dnsServer.endPacket(); }
   }
   return did;
@@ -389,6 +590,27 @@ static void handleStats() {
     j += (i ? "," : ""); j += "{\"ip\":\"" + ip.toString() + "\",\"mac\":\"" + macStr(c.mac) + "\",\"blocked\":" + c.blocked + ",\"allowed\":" + c.allowed + ",\"banned\":" + (c.banned?"true":"false") + "}"; }
   j += "],\"custom\":[";
   for (int i = 0; i < numCustom; i++) { j += (i ? "," : ""); j += "\"" + jesc(customDom[i]) + "\""; }
+  j += "],\"allow\":[";
+  for (int i = 0; i < numAllow; i++) { j += (i ? "," : ""); j += "\"" + jesc(allowDom[i]) + "\""; }
+  j += "],\"topBlocked\":[";
+  for (int i = 0; i < numTopBlocked; i++) {
+    j += (i ? "," : "");
+    j += "{\"domain\":\"" + jesc(topBlocked[i].domain) + "\",\"count\":" + String(topBlocked[i].count) + "}";
+  }
+  j += "],\"upstream\":{\"ip\":\"" + upstreamIP.toString() + "\",\"port\":" + String(upstreamPort) + ",\"name\":\"" + jesc(upstreamName) + "\"}";
+  j += ",\"weather\":{\"temp\":" + String(currentWeather.temp, 1) + ",\"feels\":" + String(currentWeather.feelsLike, 1) +
+       ",\"hum\":" + String(currentWeather.humidity) + ",\"wind\":" + String(currentWeather.windSpeed, 1) +
+       ",\"cond\":\"" + jesc(currentWeather.conditionStr) + "\",\"valid\":" + (currentWeather.valid ? "true" : "false") + "}";
+  j += ",\"curPage\":" + String(currentPage);
+  j += ",\"logs\":[";
+  int outCount = (logCount > 35) ? 35 : logCount;
+  for (int i = 0; i < outCount; i++) {
+    int idx = (logHead - 1 - i + MAX_LOGS) % MAX_LOGS;
+    QueryLog& l = queryLogs[idx];
+    IPAddress cip(l.clientIp);
+    j += (i ? "," : "");
+    j += "{\"d\":\"" + jesc(l.domain) + "\",\"ip\":\"" + cip.toString() + "\",\"b\":" + (l.blocked ? "true" : "false") + ",\"t\":" + String(l.timeSec) + "}";
+  }
   j += "]}";
   web.send(200, "application/json", j);
 }
@@ -443,6 +665,62 @@ static void handleSetPassword() {
 static void handleBan() {
   if (!requireAuth()) return;
   IPAddress ip; if (ip.fromString(web.arg("ip"))) { Dev* c = getClient((uint32_t)ip); if (c) { c->banned = !c->banned; saveBanned(); } }
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleDnsTest() {
+  String d = web.arg("d");
+  d.trim(); d.toLowerCase();
+  if (d.startsWith("www.")) d = d.substring(4);
+  if (!d.length()) { web.send(400, "application/json", "{\"error\":\"empty domain\"}"); return; }
+
+  bool inAllow = isAllowedDomain(d.c_str());
+  bool inCust = inCustom(fnv40(d.c_str(), d.length()));
+  bool inFlsh = isBlocked(d.c_str());
+  bool wouldBlock = !inAllow && (inCust || inFlsh);
+
+  String reason = "none";
+  if (inAllow) reason = "Allowed by Whitelist Rule";
+  else if (inCust) reason = "Blocked by Custom Block Rule";
+  else if (inFlsh) reason = "Blocked by Global Flash Blocklist";
+  else reason = "Passed (Forwarded to Upstream DNS)";
+
+  String resp = "{\"domain\":\"" + jesc(d) + "\",\"blocked\":" + (wouldBlock ? "true" : "false") +
+                ",\"reason\":\"" + jesc(reason) + "\",\"upstream\":\"" + upstreamIP.toString() + ":" + String(upstreamPort) + "\"}";
+  web.send(200, "application/json", resp);
+}
+
+static void handleFlushCache() {
+  if (!requireAuth()) return;
+  for (int i = 0; i < CACHE_SIZE; i++) cacheValid[i] = 0;
+  displayToast("DNS CACHE FLUSHED", 2500);
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleSetUpstream() {
+  if (!requireAuth()) return;
+  String ipStr = web.arg("ip");
+  IPAddress ip;
+  if (!ip.fromString(ipStr)) { web.send(400, "text/plain", "Invalid IP address"); return; }
+  uint16_t port = web.hasArg("port") ? web.arg("port").toInt() : 53;
+  if (port == 0) port = 53;
+  String name = web.hasArg("name") ? web.arg("name") : "Custom";
+  saveUpstream(ip, port, name);
+  displayToast("UPSTREAM UPDATED", 2500);
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleSetPage() {
+  if (!requireAuth()) return;
+  uint8_t p = web.arg("p").toInt();
+  setDisplayPage(p);
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleSetBrightness() {
+  if (!requireAuth()) return;
+  uint8_t b = web.arg("b").toInt();
+  setDisplayBrightness(b);
   web.send(200, "text/plain", "ok");
 }
 
@@ -664,8 +942,9 @@ void setup() {
     Serial.printf("blocklist: %u domains\n", numHashes);
     buildFlashIndex();
   }
-  loadCustom(); loadBanned(); loadUpdateCfg();
-  Serial.printf("custom: %d, banned: %d\n", numCustom, numBanned);
+  loadCustom(); loadAllow(); loadBanned(); loadUpdateCfg(); loadUpstream();
+  Serial.printf("custom: %d, allow: %d, banned: %d, upstream: %s:%d\n",
+                numCustom, numAllow, numBanned, upstreamIP.toString().c_str(), upstreamPort);
 
   // Hold BOOT at power-on to wipe saved WiFi and reset password
 #if CONFIG_IDF_TARGET_ESP32C3
@@ -688,6 +967,9 @@ void setup() {
   Serial.printf("WiFi up: %s\n", WiFi.localIP().toString().c_str());
   if (MDNS.begin("c3adblock")) { MDNS.addService("http", "tcp", 80); Serial.println("dashboard: http://c3adblock.local"); }
 
+  // Sync NTP time (GMT+8 for Taiwan)
+  configTime(8 * 3600, 0, "pool.ntp.org", "time.google.com");
+
   if (currentWebPass == "CHANGE_ME_WEB_PASSWORD")
     Serial.println("[WARN] placeholder WEB_PASS in use.");
 
@@ -698,6 +980,13 @@ void setup() {
   web.on("/ban", handleBan);
   web.on("/addblock", []() { if (!requireAuth()) return; addCustom(web.arg("d")); web.send(200, "text/plain", "ok"); });
   web.on("/unblock", []() { if (!requireAuth()) return; removeCustom(web.arg("d")); web.send(200, "text/plain", "ok"); });
+  web.on("/addallow", []() { if (!requireAuth()) return; addAllow(web.arg("d")); web.send(200, "text/plain", "ok"); });
+  web.on("/unallow", []() { if (!requireAuth()) return; removeAllow(web.arg("d")); web.send(200, "text/plain", "ok"); });
+  web.on("/setupstream", handleSetUpstream);
+  web.on("/dnstest", handleDnsTest);
+  web.on("/flushcache", handleFlushCache);
+  web.on("/setpage", handleSetPage);
+  web.on("/setbrightness", handleSetBrightness);
   web.on("/pause", []() {                    // /pause?s=300  (0 or absent = indefinite)
     if (!requireAuth()) return;
     long s = web.hasArg("s") ? web.arg("s").toInt() : 0;
@@ -735,6 +1024,17 @@ void loop() {
     uint32_t now = millis();
     if (lastCheckMs == 0) lastCheckMs = now;   // skip an immediate fetch on boot
     else if (now - lastCheckMs >= updateIntervalH * 3600000UL) { lastCheckMs = now; fetchBlocklist(updateUrl); }
+  }
+  // periodic weather forecast update every 20 minutes
+  if (WiFi.status() == WL_CONNECTED) {
+    uint32_t now = millis();
+    if (lastWeatherFetch == 0 && now > 4000) {
+      lastWeatherFetch = now;
+      updateWeather();
+    } else if (now - lastWeatherFetch >= 1200000UL) {
+      lastWeatherFetch = now;
+      updateWeather();
+    }
   }
   updateDisplay();
   if (!busy) delay(1);   // sleep only when idle: full speed under load, cool when quiet

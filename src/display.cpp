@@ -35,6 +35,26 @@ extern String updateStatus;
 extern String updateUrl;
 extern bool fetchBlocklist(String url);
 
+struct WeatherData {
+    float temp;
+    float feelsLike;
+    int humidity;
+    float windSpeed;
+    int weatherCode;
+    char conditionStr[24];
+    uint32_t lastUpdate;
+    bool valid;
+};
+
+struct TopDomain {
+    char domain[48];
+    uint32_t count;
+};
+
+extern TopDomain topBlocked[10];
+extern int numTopBlocked;
+extern WeatherData currentWeather;
+
 // TFT & Sprite objects
 static TFT_eSPI tft = TFT_eSPI();
 static TFT_eSprite spr = TFT_eSprite(&tft);
@@ -45,7 +65,7 @@ static OneButton btn2(PIN_BUTTON_2, true); // User Key (GPIO 21)
 
 // Navigation & Brightness State
 uint8_t currentPage = 0;
-static const uint8_t MAX_PAGES = 4;
+static const uint8_t MAX_PAGES = 6;
 static uint8_t brightnessLevels[] = {255, 170, 75, 15};
 static uint8_t brightnessIndex = 0;
 static bool screenAsleep = false;
@@ -68,6 +88,8 @@ static uint32_t lastTouchMs = 0;
 // Function declarations
 static void drawPageOverview();
 static void drawPageActivity();
+static void drawPageClockWeather();
+static void drawPageTopBlocked();
 static void drawPageSystem();
 static void drawPageQR();
 static void drawHeader(const char* title, uint16_t titleColor);
@@ -94,6 +116,17 @@ void setDisplayBrightness(uint8_t brightness) {
 
 void nextPage() {
     currentPage = (currentPage + 1) % MAX_PAGES;
+}
+
+void setDisplayPage(uint8_t page) {
+    if (page < MAX_PAGES) {
+        currentPage = page;
+        if (screenAsleep) {
+            screenAsleep = false;
+            lcd_wakeup();
+            lcd_setBrightness(brightnessLevels[brightnessIndex]);
+        }
+    }
 }
 
 static void onBtn1Click() {
@@ -257,10 +290,12 @@ void updateDisplay(bool force) {
     spr.fillSprite(COLOR_BG);
 
     switch (currentPage) {
-        case 0: drawPageOverview(); break;
-        case 1: drawPageActivity(); break;
-        case 2: drawPageSystem();   break;
-        case 3: drawPageQR();       break;
+        case 0: drawPageOverview();     break;
+        case 1: drawPageActivity();     break;
+        case 2: drawPageClockWeather(); break;
+        case 3: drawPageTopBlocked();   break;
+        case 4: drawPageSystem();       break;
+        case 5: drawPageQR();           break;
     }
 
     drawToast();
@@ -294,12 +329,12 @@ static void drawFooter() {
     // Help prompts
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString("[KEY 1] Page  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
+    spr.drawString("[KEY 1] Page (1-6)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
 
-    // Page indicator dots
+    // Page indicator dots (6 dots)
     spr.setTextDatum(TR_DATUM);
     for (int i = 0; i < MAX_PAGES; i++) {
-        int dotX = SCREEN_W - 70 + (i * 14);
+        int dotX = SCREEN_W - 95 + (i * 14);
         if (i == currentPage) {
             spr.fillCircle(dotX, 222, 4, COLOR_CYAN);
         } else {
@@ -515,6 +550,167 @@ static void drawPageActivity() {
     snprintf(statSummary, sizeof(statSummary), "Total: %lu queries   |   Blocked: %lu   |   Allowed: %lu",
              totalBlocked + totalAllowed, totalBlocked, totalAllowed);
     spr.drawString(statSummary, 24, 186, 2);
+
+    drawFooter();
+}
+
+static void drawPageClockWeather() {
+    drawHeader("CLOCK & WEATHER", COLOR_CYAN);
+
+    int cardW = (SCREEN_W - 34) / 2;
+    int cardH = 126;
+    int x1 = 12;
+    int x2 = x1 + cardW + 10;
+    int y1 = 36;
+
+    // Card 1: Clock & Calendar
+    spr.fillRoundRect(x1, y1, cardW, cardH, 8, COLOR_CARD);
+    spr.drawRoundRect(x1, y1, cardW, cardH, 8, COLOR_CARD_BORDER);
+
+    struct tm timeinfo;
+    bool timeOk = getLocalTime(&timeinfo, 10);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+    spr.drawString("LOCAL TIME (GMT+8)", x1 + 12, y1 + 10, 1);
+
+    if (timeOk) {
+        char timeStr[16];
+        snprintf(timeStr, sizeof(timeStr), "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+        spr.setTextDatum(TL_DATUM);
+        spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+        spr.drawString(timeStr, x1 + 12, y1 + 28, 6);
+
+        static const char* const WDAYS[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+        char dateStr[32];
+        snprintf(dateStr, sizeof(dateStr), "%04d-%02d-%02d %s",
+                 timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                 WDAYS[timeinfo.tm_wday % 7]);
+        spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+        spr.drawString(dateStr, x1 + 12, y1 + 82, 2);
+
+        spr.setTextColor(COLOR_GREEN, COLOR_CARD);
+        spr.drawString("NTP Synchronized", x1 + 12, y1 + 104, 1);
+    } else {
+        spr.setTextDatum(MC_DATUM);
+        spr.setTextColor(COLOR_AMBER, COLOR_CARD);
+        spr.drawString("Syncing NTP...", x1 + cardW / 2, y1 + 55, 4);
+        spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+        spr.drawString("Waiting for time server", x1 + cardW / 2, y1 + 95, 2);
+    }
+
+    // Card 2: Weather Forecast
+    spr.fillRoundRect(x2, y1, cardW, cardH, 8, COLOR_CARD);
+    spr.drawRoundRect(x2, y1, cardW, cardH, 8, COLOR_CARD_BORDER);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_AMBER, COLOR_CARD);
+    spr.drawString("WEATHER FORECAST", x2 + 12, y1 + 10, 1);
+
+    if (currentWeather.valid) {
+        spr.setTextDatum(TL_DATUM);
+        spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+        char tempStr[16];
+        snprintf(tempStr, sizeof(tempStr), "%.1f", currentWeather.temp);
+        spr.drawString(tempStr, x2 + 12, y1 + 28, 6);
+        spr.drawString(" C", x2 + 12 + spr.textWidth(tempStr, 6) + 4, y1 + 36, 4);
+
+        spr.setTextDatum(TL_DATUM);
+        spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+        spr.drawString(currentWeather.conditionStr, x2 + 12, y1 + 82, 2);
+
+        spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+        char envStr[48];
+        snprintf(envStr, sizeof(envStr), "Hum: %d%%  |  Wind: %.0f km/h",
+                 currentWeather.humidity, currentWeather.windSpeed);
+        spr.drawString(envStr, x2 + 12, y1 + 104, 1);
+    } else {
+        spr.setTextDatum(MC_DATUM);
+        spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+        spr.drawString("Updating...", x2 + cardW / 2, y1 + 55, 4);
+        spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+        spr.drawString("Fetching Open-Meteo", x2 + cardW / 2, y1 + 95, 2);
+    }
+
+    // Bottom Mini Shield Ticker (y: 172 to 200)
+    spr.fillRoundRect(14, 172, SCREEN_W - 28, 28, 6, COLOR_CARD);
+    spr.drawRoundRect(14, 172, SCREEN_W - 28, 28, 6, COLOR_CARD_BORDER);
+    spr.setTextDatum(ML_DATUM);
+    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+
+    uint32_t totalQueries = totalBlocked + totalAllowed;
+    float blockRate = (totalQueries > 0) ? ((float)totalBlocked * 100.0f / totalQueries) : 0.0f;
+    char ticker[80];
+    snprintf(ticker, sizeof(ticker), "Shield %s  |  Blocked: %lu (%.1f%%)  |  Allowed: %lu  |  Clients: %d",
+             blockingOn ? "ON" : "OFF", totalBlocked, blockRate, totalAllowed, numClients);
+    spr.drawString(ticker, 24, 186, 2);
+
+    drawFooter();
+}
+
+static void drawPageTopBlocked() {
+    drawHeader("TOP BLOCKED DOMAINS", COLOR_RED);
+
+    int boxX = 14;
+    int boxY = 36;
+    int boxW = SCREEN_W - 28;
+    int boxH = 164;
+
+    spr.fillRoundRect(boxX, boxY, boxW, boxH, 8, COLOR_CARD);
+    spr.drawRoundRect(boxX, boxY, boxW, boxH, 8, COLOR_CARD_BORDER);
+
+    if (numTopBlocked == 0) {
+        spr.setTextDatum(MC_DATUM);
+        spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+        spr.drawString("No blocked domains recorded yet.", boxX + (boxW / 2), boxY + 70, 2);
+        spr.drawString("Traffic will be ranked here in real time.", boxX + (boxW / 2), boxY + 95, 2);
+    } else {
+        int maxItems = (numTopBlocked > 5) ? 5 : numTopBlocked;
+        uint32_t maxCount = topBlocked[0].count;
+        if (maxCount == 0) maxCount = 1;
+
+        int rowH = 30;
+        int startY = boxY + 8;
+
+        for (int i = 0; i < maxItems; i++) {
+            int ry = startY + (i * rowH);
+
+            uint16_t badgeColor = COLOR_GRAY;
+            if (i == 0) badgeColor = COLOR_AMBER;
+            else if (i == 1) badgeColor = COLOR_CYAN;
+            else if (i == 2) badgeColor = 0xFA60;
+
+            spr.fillRoundRect(boxX + 10, ry + 2, 32, 22, 4, badgeColor);
+            spr.setTextDatum(MC_DATUM);
+            spr.setTextColor(COLOR_BG, badgeColor);
+            char rkStr[8];
+            snprintf(rkStr, sizeof(rkStr), "#%d", i + 1);
+            spr.drawString(rkStr, boxX + 26, ry + 13, 2);
+
+            spr.setTextDatum(ML_DATUM);
+            spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+            String dName = topBlocked[i].domain;
+            if (dName.length() > 32) dName = dName.substring(0, 29) + "...";
+            spr.drawString(dName, boxX + 50, ry + 13, 2);
+
+            char cStr[16];
+            snprintf(cStr, sizeof(cStr), "%lu hits", topBlocked[i].count);
+            spr.setTextDatum(MR_DATUM);
+            spr.setTextColor(COLOR_RED, COLOR_CARD);
+            spr.drawString(cStr, boxX + boxW - 14, ry + 13, 2);
+
+            int pBarW = 110;
+            int fillW = (int)((float)topBlocked[i].count / maxCount * pBarW);
+            if (fillW < 2) fillW = 2;
+            int pBarX = boxX + boxW - 130 - pBarW;
+            spr.drawRoundRect(pBarX, ry + 8, pBarW, 8, 2, COLOR_DARKGRAY);
+            spr.fillRoundRect(pBarX, ry + 8, fillW, 8, 2, COLOR_RED);
+
+            if (i < maxItems - 1) {
+                spr.drawFastHLine(boxX + 10, ry + rowH - 1, boxW - 20, COLOR_CARD_BORDER);
+            }
+        }
+    }
 
     drawFooter();
 }

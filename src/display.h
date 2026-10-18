@@ -21,5 +21,8 @@ void setDisplayBrightness(uint8_t brightness);
 // Cycle to next page
 void nextPage();
 
-// Current page index (0: Overview, 1: DNS Activity, 2: System Health, 3: QR Portal)
+// Set active page directly (0 to 5)
+void setDisplayPage(uint8_t page);
+
+// Current page index (0: Overview, 1: DNS Activity, 2: Clock & Weather, 3: Top Blocked, 4: System Health, 5: QR Portal)
 extern uint8_t currentPage;
