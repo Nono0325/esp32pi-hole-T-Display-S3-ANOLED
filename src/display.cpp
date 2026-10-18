@@ -605,7 +605,9 @@ static void drawPageClockWeather() {
 
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_AMBER, COLOR_CARD);
-    spr.drawString("WEATHER FORECAST", x2 + 12, y1 + 10, 1);
+    extern String weatherCity;
+    String wTitle = weatherCity.length() ? weatherCity : "WEATHER FORECAST";
+    spr.drawString(wTitle, x2 + 12, y1 + 10, 1);
 
     if (currentWeather.valid) {
         spr.setTextDatum(TL_DATUM);
