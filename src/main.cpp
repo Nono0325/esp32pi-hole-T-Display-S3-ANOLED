@@ -915,6 +915,7 @@ static void handleStats() {
        ",\"cond\":\"" + jesc(currentWeather.conditionStr) + "\",\"valid\":" + (currentWeather.valid ? "true" : "false") +
        ",\"city\":\"" + jesc(weatherCity) + "\",\"lat\":\"" + weatherLat + "\",\"lon\":\"" + weatherLon + "\"}";
   j += ",\"curPage\":" + String(currentPage);
+  j += ",\"screensaver\":" + String(isScreensaverActive() ? "true" : "false");
   j += ",\"radarAlert\":\"" + jesc(radarAlertStr) + "\"";
   j += ",\"screenAsleep\":" + String(isDisplaySleeping() ? "true" : "false");
   j += ",\"sleepTimeout\":" + String(getSleepTimeout());
@@ -1427,6 +1428,11 @@ void setup() {
   web.on("/flushcache", handleFlushCache);
   web.on("/radartest", handleRadarTest);
   web.on("/gesturetest", handleGestureTest);
+  web.on("/screensaver", []() {
+    if (!requireAuth()) return;
+    startScreensaver();
+    web.send(200, "text/plain", "ok");
+  });
   web.on("/setpage", handleSetPage);
   web.on("/setdevname", []() {
     if (!requireAuth()) return;

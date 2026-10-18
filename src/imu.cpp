@@ -272,13 +272,13 @@ void updateIMU() {
     lastAccelMag = mag;
 
     // A. Double-Tap Detection (輕敲機身兩下 -> 翻至下一頁)
-    const int32_t TAP_THRESHOLD = 4600;
-    if (delta > TAP_THRESHOLD && (now - lastTapDetectedMs > 80)) {
+    const int32_t TAP_THRESHOLD = 2600;
+    if (delta > TAP_THRESHOLD && (now - lastTapDetectedMs > 60)) {
         if (tapCount == 0) {
             tapCount = 1;
             firstTapMs = now;
             lastTapDetectedMs = now;
-        } else if (tapCount == 1 && (now - firstTapMs >= 110 && now - firstTapMs <= 550)) {
+        } else if (tapCount == 1 && (now - firstTapMs >= 70 && now - firstTapMs <= 650)) {
             tapCount = 0;
             lastTapDetectedMs = now;
             nextPage();
@@ -286,7 +286,7 @@ void updateIMU() {
             Serial.println("[imu] Double-Tap detected! Switched page.");
         }
     }
-    if (tapCount == 1 && (now - firstTapMs > 600)) {
+    if (tapCount == 1 && (now - firstTapMs > 700)) {
         tapCount = 0;
     }
 

@@ -27,8 +27,13 @@ void setDisplayBrightness(uint8_t brightness);
 // Cycle to next page
 void nextPage();
 
-// Set active page directly (0 to 6)
+// Set active page directly (0 to 5, or 6 for Matrix screensaver)
 void setDisplayPage(uint8_t page);
+
+// Check and control Matrix screensaver
+bool isScreensaverActive();
+void startScreensaver();
+void exitScreensaver();
 
 // Screen sleep and wakeup controls
 void sleepDisplay();
@@ -45,7 +50,7 @@ void resetActivityTimer();
 // Internet Sentinel connectivity status & ping latency
 void setInternetStatus(bool online, int32_t rttMs);
 
-// Current page index (0: Overview, 1: DNS Activity, 2: Clock & Weather, 3: Top Blocked, 4: System Health, 5: QR Portal, 6: Matrix Screensaver)
+// Current page index (0: Overview, 1: DNS Activity, 2: Clock & Weather, 3: Top Blocked, 4: System Health, 5: QR Portal)
 extern uint8_t currentPage;
 
 // Play / Replay NonoWuW Cyber Boot Animation

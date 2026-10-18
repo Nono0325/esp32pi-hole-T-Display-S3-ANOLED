@@ -236,7 +236,7 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
       AMOLED 深度休眠關閉像素發光與驅動晶片，有效防止面板烙印並降低功耗與發熱。點擊實體按鍵、觸控螢幕或網頁隨時可立即喚醒。
     </div>
 
-    <div style="font-weight:600;margin-bottom:8px">螢幕畫面遠端切換</div>
+    <div style="font-weight:600;margin-bottom:8px">螢幕畫面遠端切換 (Page 0 ~ 5 循環輪播)</div>
     <div class="tool-row btn-grp" style="margin-bottom:14px">
       <button onclick="setScreenPage(0)">第 0 頁: 防護總覽</button>
       <button onclick="setScreenPage(1)">第 1 頁: 流量圖表</button>
@@ -244,7 +244,7 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
       <button onclick="setScreenPage(3)">第 3 頁: 攔截排行</button>
       <button onclick="setScreenPage(4)">第 4 頁: 硬體健康</button>
       <button onclick="setScreenPage(5)">第 5 頁: 掃碼連線</button>
-      <button onclick="setScreenPage(6)" style="background:#042f1a;color:#3fb950;border-color:#238636;font-weight:600">⚡ 第 6 頁: 駭客代碼雨屏保</button>
+      <button onclick="triggerScreensaver()" style="background:#042f1a;color:#3fb950;border-color:#238636;font-weight:600">⚡ 獨立模式: 賽博代碼雨屏保</button>
     </div>
 
     <div style="font-weight:600;margin-bottom:8px">硬體感測與雷達測試工具</div>
@@ -753,6 +753,10 @@ async function triggerRadarTest(){
 }
 async function triggerGestureTest(){
   await fetch('/gesturetest', {headers: CSRF_HDRS});
+  load();
+}
+async function triggerScreensaver(){
+  await fetch('/screensaver', {headers: CSRF_HDRS});
   load();
 }
 

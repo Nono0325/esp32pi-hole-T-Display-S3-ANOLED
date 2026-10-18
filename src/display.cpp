@@ -74,11 +74,11 @@ static OneButton btn2(PIN_BUTTON_2, true); // User Key (GPIO 21)
 
 // Navigation & Brightness State
 uint8_t currentPage = 0;
-static uint8_t previousPage = 0;
-static const uint8_t MAX_PAGES = 7;
+static const uint8_t MAX_PAGES = 6;
 static uint8_t brightnessLevels[] = {255, 170, 75, 15};
 static uint8_t brightnessIndex = 1; // Default to 66% (170) to reduce AMOLED heat and power draw
 static bool screenAsleep = false;
+static bool screensaverActive = false;
 
 // Sleep Timeout & Activity State (persisted in NVS "disp")
 static uint32_t sleepTimeoutSec = 300; // default 5 minutes (0 = never)
@@ -198,25 +198,46 @@ void setDisplayBrightness(uint8_t brightness) {
     resetActivityTimer();
 }
 
-void nextPage() {
-    if (currentPage == 6) {
-        currentPage = previousPage;
-    } else {
-        previousPage = currentPage;
-        currentPage = (currentPage + 1) % MAX_PAGES;
+bool isScreensaverActive() {
+    return screensaverActive;
+}
+
+void startScreensaver() {
+    screensaverActive = true;
+    resetActivityTimer();
+    updateDisplay(true);
+    Serial.println("[display] Matrix Screensaver activated");
+}
+
+void exitScreensaver() {
+    if (screensaverActive) {
+        screensaverActive = false;
+        resetActivityTimer();
+        updateDisplay(true);
+        Serial.println("[display] Matrix Screensaver exited -> Returning to dashboard");
     }
+}
+
+void nextPage() {
+    if (screensaverActive) {
+        exitScreensaver();
+        return;
+    }
+    currentPage = (currentPage + 1) % MAX_PAGES;
     resetActivityTimer();
 }
 
 void setDisplayPage(uint8_t page) {
-    if (page < MAX_PAGES) {
-        if (currentPage != 6) previousPage = currentPage;
-        currentPage = page;
-        if (screenAsleep) {
-            wakeupDisplay();
-        } else {
-            resetActivityTimer();
-        }
+    if (page >= MAX_PAGES) {
+        startScreensaver();
+        return;
+    }
+    screensaverActive = false;
+    currentPage = page;
+    if (screenAsleep) {
+        wakeupDisplay();
+    } else {
+        resetActivityTimer();
     }
 }
 
@@ -226,18 +247,36 @@ static void onBtn1Click() {
         wakeupDisplay();
         return;
     }
-    if (currentPage == 6) {
-        currentPage = previousPage;
+    if (screensaverActive) {
+        exitScreensaver();
         return;
     }
-    previousPage = currentPage;
     nextPage();
+}
+
+static void onBtn1DoubleClick() {
+    resetActivityTimer();
+    if (screenAsleep) {
+        wakeupDisplay();
+        return;
+    }
+    if (screensaverActive) {
+        exitScreensaver();
+        return;
+    }
+    nextPage();
+    displayToast("👆 2x CLICK: NEXT PAGE", 1500);
+    Serial.println("[button] Button 1 Double-Click (Tap-Tap) -> Switched page");
 }
 
 static void onBtn1LongPress() {
     resetActivityTimer();
     if (screenAsleep) {
         wakeupDisplay();
+        return;
+    }
+    if (screensaverActive) {
+        exitScreensaver();
         return;
     }
     displayToast("UPDATING RULES...", 3000);
@@ -255,8 +294,8 @@ static void onBtn2Click() {
         wakeupDisplay();
         return;
     }
-    if (currentPage == 6) {
-        currentPage = previousPage;
+    if (screensaverActive) {
+        exitScreensaver();
         return;
     }
     // Toggle blocking state: Active <-> Paused 5 mins (300s)
@@ -275,6 +314,10 @@ static void onBtn2LongPress() {
     resetActivityTimer();
     if (screenAsleep) {
         wakeupDisplay();
+        return;
+    }
+    if (screensaverActive) {
+        exitScreensaver();
         return;
     }
     brightnessIndex = (brightnessIndex + 1) % 4;
@@ -584,6 +627,7 @@ void initDisplay() {
 
     // 4. Configure Buttons
     btn1.attachClick(onBtn1Click);
+    btn1.attachDoubleClick(onBtn1DoubleClick); // Double-click Button 1 (BOOT) -> Tap-Tap Next Page
     btn1.attachLongPressStart(onBtn1LongPress);
     btn2.attachClick(onBtn2Click);
     btn2.attachDoubleClick(flipScreen180); // Double-click Button 2 to flip 180 degrees
@@ -613,9 +657,10 @@ void initDisplay() {
     playBootAnimation();
 }
 
+static uint32_t lastTouchTapMs = 0;
 static void checkTouch() {
     if (!hasTouch) return;
-    if (millis() - lastTouchMs < 300) return;
+    if (millis() - lastTouchMs < 200) return;
 
     Wire.beginTransmission(0x15);
     Wire.write(0x01); // Register 0x01: Gesture ID
@@ -636,6 +681,10 @@ static void checkTouch() {
                 wakeupDisplay();
                 return;
             }
+            if (screensaverActive) {
+                exitScreensaver();
+                return;
+            }
             uint16_t tx = (xHigh << 8) | xLow;
             uint16_t ty = (yHigh << 8) | yLow;
 
@@ -645,8 +694,16 @@ static void checkTouch() {
             } else if (gesture == 0x04 || (gesture == 0x05 && tx < SCREEN_W / 3)) {
                 currentPage = (currentPage + MAX_PAGES - 1) % MAX_PAGES;
             } else if (gesture == 0x05) {
-                // Center tap: toggle blocking
-                onBtn2Click();
+                // Detect double-tap in center region (80ms ~ 450ms)
+                uint32_t now = millis();
+                if (now - lastTouchTapMs >= 80 && now - lastTouchTapMs <= 450) {
+                    lastTouchTapMs = 0;
+                    nextPage();
+                    displayToast("👆 TAP-TAP: NEXT PAGE", 1500);
+                } else {
+                    lastTouchTapMs = now;
+                    onBtn2Click();
+                }
             }
         }
     }
@@ -679,14 +736,14 @@ void updateDisplay(bool force) {
 
     // Inactivity screensaver & sleep check
     if (sleepTimeoutSec > 0 && !screenAsleep && (millis() - lastActivityMs >= sleepTimeoutSec * 1000UL)) {
-        if (currentPage != 6) {
+        if (!screensaverActive) {
             // First step of idle: enter Matrix Code Rain Screensaver
-            previousPage = currentPage;
-            currentPage = 6;
+            screensaverActive = true;
             lastActivityMs = millis();
             displayToast("MATRIX SCREENSAVER", 1500);
         } else {
             // Second step: already in Matrix screensaver for another timeout -> deep sleep
+            screensaverActive = false;
             sleepDisplay();
         }
     }
@@ -714,20 +771,24 @@ void updateDisplay(bool force) {
     }
 
     static uint32_t lastRender = 0;
-    uint32_t renderInterval = (currentPage == 6) ? 35 : 350; // Fluid ~28FPS for Matrix, 3FPS for dashboards
+    uint32_t renderInterval = screensaverActive ? 35 : 350; // Fluid ~28FPS for Matrix, 3FPS for dashboards
     if (!force && millis() - lastRender < renderInterval) return;
     lastRender = millis();
 
     spr.fillSprite(COLOR_BG);
 
-    switch (currentPage) {
-        case 0: drawPageOverview();          break;
-        case 1: drawPageActivity();          break;
-        case 2: drawPageClockWeather();      break;
-        case 3: drawPageTopBlocked();        break;
-        case 4: drawPageSystem();            break;
-        case 5: drawPageQR();                break;
-        case 6: drawPageMatrixScreensaver(); break;
+    if (screensaverActive) {
+        drawPageMatrixScreensaver();
+    } else {
+        switch (currentPage) {
+            case 0: drawPageOverview();          break;
+            case 1: drawPageActivity();          break;
+            case 2: drawPageClockWeather();      break;
+            case 3: drawPageTopBlocked();        break;
+            case 4: drawPageSystem();            break;
+            case 5: drawPageQR();                break;
+            default: drawPageOverview();         break;
+        }
     }
 
     drawToast();
@@ -770,14 +831,14 @@ static void drawFooter() {
     // Help prompts
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString("[KEY 1] Page (1-7)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
+    spr.drawString("[KEY 1] Page (1-6) | 2x: Tap-Tap  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
 
-    // Page indicator dots (7 dots)
+    // Page indicator dots (6 dots for Pages 0-5)
     spr.setTextDatum(TR_DATUM);
     for (int i = 0; i < MAX_PAGES; i++) {
-        int dotX = SCREEN_W - 116 + (i * 14);
+        int dotX = SCREEN_W - 100 + (i * 15);
         if (i == currentPage) {
-            spr.fillCircle(dotX, 222, 4, (i == 6) ? COLOR_GREEN : COLOR_CYAN);
+            spr.fillCircle(dotX, 222, 4, COLOR_CYAN);
         } else {
             spr.drawCircle(dotX, 222, 3, COLOR_DARKGRAY);
         }
@@ -1592,6 +1653,6 @@ static void drawPageMatrixScreensaver() {
     // 4. Return Guidance at Bottom
     spr.setTextDatum(MC_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString("[ TAP 2x / KEY 1 TO RETURN ]", SCREEN_W / 2, SCREEN_H - 14, 2);
+    spr.drawString("[ TAP 2x / ANY KEY TO EXIT SCREENSAVER ]", SCREEN_W / 2, SCREEN_H - 14, 2);
 }
 
