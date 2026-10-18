@@ -264,7 +264,11 @@ static void loadCustom() {
       "sitemaji.com", "exdynsrv.com", "exoclick.com", "aralego.com", "aralego.net",
       "holmesmind.com", "appier.net", "dable.io", "guoshipartners.com", "onevision.com.tw",
       "run-syndicate.com", "tamedia.com.tw", "googletagmanager.com", "google-analytics.com",
-      "popads.net", "adsterra.com", "propellerads.com", "mgid.com", "adtrue.com"
+      "popads.net", "adsterra.com", "propellerads.com", "mgid.com", "adtrue.com", "doubleclick.net",
+      "trafficjunky.com", "tsyndicate.com", "juicyads.com", "realsrv.com", "rmhfrtnd.com",
+      "qyadteltyqgqavxjbpfiupzth.com", "sng.link", "lovebiaoai.xyz", "vqx7n8k2m9r4t6p.com",
+      "n4t8vq2k7mx9r6p.com", "9wv6iszcedakp8l41z4a.com", "qcshorturla2.work", "2026see.work",
+      "gstation.work", "cos14.cc", "afengy.com", "66coco.xyz", "ntlthwf6vut1du60i4rps.com", "fufuhouse.work"
     };
     for (const char* d : DEFAULT_ADS) {
       addCustom(d);
