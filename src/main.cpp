@@ -58,7 +58,7 @@ static uint8_t cacheRes[CACHE_SIZE];
 static uint8_t cacheValid[CACHE_SIZE];
 static uint8_t rangeBuf[MAX_RANGE * HASH_BYTES];
 
-struct Dev { uint32_t ip; uint8_t mac[6]; uint32_t blocked, allowed, lastSeen; bool banned; String label; };
+struct Dev { uint32_t ip; uint8_t mac[6]; uint32_t blocked, allowed, lastSeen, firstSeen; bool banned; String label; };
 static const int MAX_CLIENTS = 96;
 Dev clients[MAX_CLIENTS]; int numClients = 0;
 
@@ -563,11 +563,24 @@ static Dev* getClient(uint32_t ip) {
   }
   if (numClients < MAX_CLIENTS) {
     Dev* c = &clients[numClients++];
-    c->ip = ip; c->blocked = c->allowed = 0; c->lastSeen = millis(); c->banned = isBannedIP(ip); c->label = "";
+    c->ip = ip; c->blocked = c->allowed = 0; c->lastSeen = millis(); c->firstSeen = millis(); c->banned = isBannedIP(ip); c->label = "";
     getMac(ip, c->mac);
+    if (ip != (uint32_t)WiFi.localIP()) {
+      IPAddress newIp(ip);
+      char radarToast[48];
+      snprintf(radarToast, sizeof(radarToast), "RADAR: NEW %s", getDeviceVendorAscii(c->mac).c_str());
+      displayToast(radarToast, 4000);
+      Serial.printf("[radar] ⚠️ NEW DEVICE DETECTED: %s (%s)\n",
+                    newIp.toString().c_str(), getDeviceVendor(c->mac).c_str());
+    }
     return c;
   }
   return nullptr;
+}
+
+void flushDnsCacheFromGesture() {
+  for (int i = 0; i < CACHE_SIZE; i++) cacheValid[i] = 0;
+  displayToast("⚡ CACHE PURGED!", 2000);
 }
 
 String getTopActiveDeviceName() {
@@ -779,7 +792,20 @@ static bool handleDns() {
 
 // ---------- web ----------
 static String macStr(const uint8_t* m) { char s[18]; snprintf(s, sizeof(s), "%02x:%02x:%02x:%02x:%02x:%02x", m[0],m[1],m[2],m[3],m[4],m[5]); return String(s); }
-static String jesc(const String& s) { String o; for (char ch : s) { if (ch == '"' || ch == '\\') o += '\\'; o += ch; } return o; }
+static String jesc(const String& s) {
+  String o;
+  o.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    unsigned char ch = (unsigned char)s[i];
+    if (ch == '"' || ch == '\\') { o += '\\'; o += (char)ch; }
+    else if (ch == '\n') { o += "\\n"; }
+    else if (ch == '\r') { o += "\\r"; }
+    else if (ch == '\t') { o += "\\t"; }
+    else if (ch < 32 || ch == 127) { /* skip unprintable binary control chars */ }
+    else { o += (char)ch; }
+  }
+  return o;
+}
 // HTML text/attribute escaping for the setup portal. jesc() covers JSON (stats
 // endpoint); the portal builds HTML, and its inputs — a scanned SSID, the
 // submitted WiFi name — are attacker-controllable during provisioning (the
@@ -862,8 +888,17 @@ static void handleStats() {
     String devName = getDeviceDisplayName(c.ip, c.mac);
     String devVendor = getDeviceVendor(c.mac);
     String devAlias = getDeviceAlias(c.ip);
+    bool isNewDev = (millis() - c.firstSeen < 300000UL);
     j += (i ? "," : "");
-    j += "{\"ip\":\"" + ip.toString() + "\",\"mac\":\"" + macStr(c.mac) + "\",\"name\":\"" + jesc(devName) + "\",\"vendor\":\"" + jesc(devVendor) + "\",\"alias\":\"" + jesc(devAlias) + "\",\"blocked\":" + c.blocked + ",\"allowed\":" + c.allowed + ",\"banned\":" + (c.banned?"true":"false") + "}";
+    j += "{\"ip\":\"" + ip.toString() + "\",\"mac\":\"" + macStr(c.mac) + "\",\"name\":\"" + jesc(devName) + "\",\"vendor\":\"" + jesc(devVendor) + "\",\"alias\":\"" + jesc(devAlias) + "\",\"blocked\":" + c.blocked + ",\"allowed\":" + c.allowed + ",\"banned\":" + (c.banned?"true":"false") + ",\"isNew\":" + (isNewDev?"true":"false") + "}";
+  }
+  String radarAlertStr = "";
+  for (int i = 0; i < numClients; i++) {
+    if (clients[i].ip != (uint32_t)WiFi.localIP() && (millis() - clients[i].firstSeen < 180000UL)) {
+      IPAddress rip(clients[i].ip);
+      radarAlertStr = rip.toString() + " (" + getDeviceVendor(clients[i].mac) + ")";
+      break;
+    }
   }
   j += "],\"custom\":[";
   for (int i = 0; i < numCustom; i++) { j += (i ? "," : ""); j += "\"" + jesc(customDom[i]) + "\""; }
@@ -880,6 +915,7 @@ static void handleStats() {
        ",\"cond\":\"" + jesc(currentWeather.conditionStr) + "\",\"valid\":" + (currentWeather.valid ? "true" : "false") +
        ",\"city\":\"" + jesc(weatherCity) + "\",\"lat\":\"" + weatherLat + "\",\"lon\":\"" + weatherLon + "\"}";
   j += ",\"curPage\":" + String(currentPage);
+  j += ",\"radarAlert\":\"" + jesc(radarAlertStr) + "\"";
   j += ",\"screenAsleep\":" + String(isDisplaySleeping() ? "true" : "false");
   j += ",\"sleepTimeout\":" + String(getSleepTimeout());
   j += ",\"cpufreq\":" + String(getCpuFrequencyMhz());
@@ -993,6 +1029,19 @@ static void handleFlushCache() {
   if (!requireAuth()) return;
   for (int i = 0; i < CACHE_SIZE; i++) cacheValid[i] = 0;
   displayToast("DNS CACHE FLUSHED", 2500);
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleRadarTest() {
+  if (!requireAuth()) return;
+  displayToast("RADAR: NEW Apple (TEST)", 4000);
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleGestureTest() {
+  if (!requireAuth()) return;
+  nextPage();
+  displayToast("👆 TAP-TAP: NEXT PAGE", 1500);
   web.send(200, "text/plain", "ok");
 }
 
@@ -1376,6 +1425,8 @@ void setup() {
   web.on("/setupstream", handleSetUpstream);
   web.on("/dnstest", handleDnsTest);
   web.on("/flushcache", handleFlushCache);
+  web.on("/radartest", handleRadarTest);
+  web.on("/gesturetest", handleGestureTest);
   web.on("/setpage", handleSetPage);
   web.on("/setdevname", []() {
     if (!requireAuth()) return;

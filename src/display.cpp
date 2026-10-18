@@ -74,7 +74,8 @@ static OneButton btn2(PIN_BUTTON_2, true); // User Key (GPIO 21)
 
 // Navigation & Brightness State
 uint8_t currentPage = 0;
-static const uint8_t MAX_PAGES = 6;
+static uint8_t previousPage = 0;
+static const uint8_t MAX_PAGES = 7;
 static uint8_t brightnessLevels[] = {255, 170, 75, 15};
 static uint8_t brightnessIndex = 1; // Default to 66% (170) to reduce AMOLED heat and power draw
 static bool screenAsleep = false;
@@ -115,6 +116,7 @@ static void drawPageClockWeather();
 static void drawPageTopBlocked();
 static void drawPageSystem();
 static void drawPageQR();
+static void drawPageMatrixScreensaver();
 static void drawHeader(const char* title, uint16_t titleColor);
 static void drawFooter();
 static void drawToast();
@@ -197,12 +199,18 @@ void setDisplayBrightness(uint8_t brightness) {
 }
 
 void nextPage() {
-    currentPage = (currentPage + 1) % MAX_PAGES;
+    if (currentPage == 6) {
+        currentPage = previousPage;
+    } else {
+        previousPage = currentPage;
+        currentPage = (currentPage + 1) % MAX_PAGES;
+    }
     resetActivityTimer();
 }
 
 void setDisplayPage(uint8_t page) {
     if (page < MAX_PAGES) {
+        if (currentPage != 6) previousPage = currentPage;
         currentPage = page;
         if (screenAsleep) {
             wakeupDisplay();
@@ -218,6 +226,11 @@ static void onBtn1Click() {
         wakeupDisplay();
         return;
     }
+    if (currentPage == 6) {
+        currentPage = previousPage;
+        return;
+    }
+    previousPage = currentPage;
     nextPage();
 }
 
@@ -240,6 +253,10 @@ static void onBtn2Click() {
     resetActivityTimer();
     if (screenAsleep) {
         wakeupDisplay();
+        return;
+    }
+    if (currentPage == 6) {
+        currentPage = previousPage;
         return;
     }
     // Toggle blocking state: Active <-> Paused 5 mins (300s)
@@ -660,9 +677,18 @@ void updateDisplay(bool force) {
         updateIMU(); // Skip I2C accelerometer polling when screen is sleeping to save power
     }
 
-    // Inactivity sleep check
+    // Inactivity screensaver & sleep check
     if (sleepTimeoutSec > 0 && !screenAsleep && (millis() - lastActivityMs >= sleepTimeoutSec * 1000UL)) {
-        sleepDisplay();
+        if (currentPage != 6) {
+            // First step of idle: enter Matrix Code Rain Screensaver
+            previousPage = currentPage;
+            currentPage = 6;
+            lastActivityMs = millis();
+            displayToast("MATRIX SCREENSAVER", 1500);
+        } else {
+            // Second step: already in Matrix screensaver for another timeout -> deep sleep
+            sleepDisplay();
+        }
     }
 
     if (screenAsleep) return;
@@ -688,18 +714,20 @@ void updateDisplay(bool force) {
     }
 
     static uint32_t lastRender = 0;
-    if (!force && millis() - lastRender < 350) return; // ~3 FPS smooth dashboard refresh
+    uint32_t renderInterval = (currentPage == 6) ? 35 : 350; // Fluid ~28FPS for Matrix, 3FPS for dashboards
+    if (!force && millis() - lastRender < renderInterval) return;
     lastRender = millis();
 
     spr.fillSprite(COLOR_BG);
 
     switch (currentPage) {
-        case 0: drawPageOverview();      break;
-        case 1: drawPageActivity();      break;
-        case 2: drawPageClockWeather();  break;
-        case 3: drawPageTopBlocked();    break;
-        case 4: drawPageSystem();        break;
-        case 5: drawPageQR();            break;
+        case 0: drawPageOverview();          break;
+        case 1: drawPageActivity();          break;
+        case 2: drawPageClockWeather();      break;
+        case 3: drawPageTopBlocked();        break;
+        case 4: drawPageSystem();            break;
+        case 5: drawPageQR();                break;
+        case 6: drawPageMatrixScreensaver(); break;
     }
 
     drawToast();
@@ -742,14 +770,14 @@ static void drawFooter() {
     // Help prompts
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString("[KEY 1] Page (1-6)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
+    spr.drawString("[KEY 1] Page (1-7)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
 
-    // Page indicator dots (6 dots)
+    // Page indicator dots (7 dots)
     spr.setTextDatum(TR_DATUM);
     for (int i = 0; i < MAX_PAGES; i++) {
-        int dotX = SCREEN_W - 96 + (i * 14);
+        int dotX = SCREEN_W - 116 + (i * 14);
         if (i == currentPage) {
-            spr.fillCircle(dotX, 222, 4, COLOR_CYAN);
+            spr.fillCircle(dotX, 222, 4, (i == 6) ? COLOR_GREEN : COLOR_CYAN);
         } else {
             spr.drawCircle(dotX, 222, 3, COLOR_DARKGRAY);
         }
@@ -1438,5 +1466,132 @@ static void drawToast() {
         spr.setTextColor(COLOR_WHITE, 0x1925);
         spr.drawString(toastMsg, SCREEN_W / 2, ty + (toastH / 2), 2);
     }
+}
+
+// ==================== Page 6: Cyber Matrix Code Rain Screensaver ====================
+#define MATRIX_COLS 38 // 536 / 14 = 38 columns
+struct MatrixCol {
+    int16_t y;            // Pixel position of drop head
+    int8_t speed;         // Fall speed (2 to 5)
+    uint8_t len;          // Trail length in chars (5 to 14)
+    char chars[16];       // Characters in this column
+    uint32_t lastMutate;  // Time of character mutation
+};
+
+static MatrixCol matrixCols[MATRIX_COLS];
+static bool matrixInited = false;
+static const char MATRIX_CHARSET[] = "0123456789ABCDEFHIJKLMNOPQRSTUVWXYZ#$*+-/:;<=>@%&!?";
+
+static void initMatrixRain() {
+    for (int c = 0; c < MATRIX_COLS; c++) {
+        matrixCols[c].y = random(-180, 240);
+        matrixCols[c].speed = random(2, 6);
+        matrixCols[c].len = random(6, 14);
+        matrixCols[c].lastMutate = millis() + random(50, 400);
+        for (int r = 0; r < 16; r++) {
+            matrixCols[c].chars[r] = MATRIX_CHARSET[random(0, sizeof(MATRIX_CHARSET) - 1)];
+        }
+    }
+    matrixInited = true;
+}
+
+static void drawPageMatrixScreensaver() {
+    if (!matrixInited) initMatrixRain();
+    uint32_t now = millis();
+
+    // 1. OLED True Black Canvas (Turns off pixels)
+    spr.fillSprite(COLOR_BG);
+
+    // 2. Render Falling Matrix Streams
+    for (int c = 0; c < MATRIX_COLS; c++) {
+        int x = c * 14 + 6;
+        matrixCols[c].y += matrixCols[c].speed;
+
+        // Reset drop when tail exits screen
+        if (matrixCols[c].y - (matrixCols[c].len * 15) > SCREEN_H) {
+            matrixCols[c].y = random(-100, -10);
+            matrixCols[c].speed = random(2, 6);
+            matrixCols[c].len = random(6, 14);
+        }
+
+        // Random character mutation (Matrix shimmer)
+        if (now > matrixCols[c].lastMutate) {
+            matrixCols[c].lastMutate = now + random(100, 350);
+            int idx = random(0, 16);
+            matrixCols[c].chars[idx] = MATRIX_CHARSET[random(0, sizeof(MATRIX_CHARSET) - 1)];
+        }
+
+        // Draw character trail
+        for (int step = 0; step < matrixCols[c].len; step++) {
+            int cy = matrixCols[c].y - (step * 15);
+            if (cy >= 0 && cy < SCREEN_H - 8) {
+                uint16_t color;
+                if (step == 0) color = COLOR_WHITE;          // Glowing white head
+                else if (step == 1) color = 0x3FE0;          // Bright neon lime
+                else if (step <= 3) color = COLOR_GREEN;      // Pure matrix green
+                else if (step <= 7) color = 0x04A0;          // Forest green
+                else color = 0x0280;                         // Deep fading cyber green
+
+                char ch = matrixCols[c].chars[step % 16];
+                spr.drawChar(ch, x, cy, 2);
+            }
+        }
+    }
+
+    // 3. Central Holographic Cyber HUD Overlay (Glassmorphism Pill)
+    int hudW = 410;
+    int hudH = 136;
+    int hudX = (SCREEN_W - hudW) / 2;
+    int hudY = (SCREEN_H - hudH) / 2 - 4;
+
+    spr.fillRoundRect(hudX, hudY, hudW, hudH, 12, 0x0842); // Deep techno carbon
+    spr.drawRoundRect(hudX, hudY, hudW, hudH, 12, COLOR_GREEN);
+    spr.drawFastHLine(hudX + 16, hudY + 2, hudW - 32, 0x3FE0); // Top neon rim
+
+    // Cyber HUD Title
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(COLOR_GREEN, 0x0842);
+    spr.drawString("NONOWUW MATRIX SENTINEL HUD", SCREEN_W / 2, hudY + 16, 2);
+
+    // Live Large Cyberpunk Clock
+    time_t tNow = time(nullptr);
+    struct tm* tmInfo = localtime(&tNow);
+    char timeBuf[32];
+    if (tmInfo && tmInfo->tm_year > 100) {
+        snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d", tmInfo->tm_hour, tmInfo->tm_min, tmInfo->tm_sec);
+    } else {
+        uint32_t s = millis() / 1000;
+        snprintf(timeBuf, sizeof(timeBuf), "%02lu:%02lu:%02lu", (s % 86400) / 3600, (s % 3600) / 60, s % 60);
+    }
+    spr.setTextColor(COLOR_WHITE, 0x0842);
+    spr.drawString(timeBuf, SCREEN_W / 2, hudY + 50, 4);
+
+    // Weather & Telemetry
+    char subBuf[64];
+    extern String weatherCity;
+    if (currentWeather.valid) {
+        snprintf(subBuf, sizeof(subBuf), "%s %.1f C  |  RAM: %luKB  |  WiFi: %ddBm",
+                 weatherCity.length() ? weatherCity.c_str() : "Taipei",
+                 currentWeather.temp, (unsigned long)(ESP.getFreeHeap() / 1024), WiFi.RSSI());
+    } else {
+        snprintf(subBuf, sizeof(subBuf), "RAM: %luKB  |  PSRAM: %luKB  |  WiFi: %ddBm",
+                 (unsigned long)(ESP.getFreeHeap() / 1024), (unsigned long)(ESP.getFreePsram() / 1024), WiFi.RSSI());
+    }
+    spr.setTextColor(COLOR_CYAN, 0x0842);
+    spr.drawString(subBuf, SCREEN_W / 2, hudY + 84, 2);
+
+    // Live Sinkhole Blocking Badge
+    uint32_t totalQueries = totalBlocked + totalAllowed;
+    float blockRate = (totalQueries > 0) ? ((float)totalBlocked * 100.0f / totalQueries) : 0.0f;
+    char statBuf[64];
+    snprintf(statBuf, sizeof(statBuf), "SHIELD: %lu BLOCKED (%.1f%%)  |  QPS: %.1f",
+             (unsigned long)totalBlocked, blockRate, currentQps);
+    spr.setTextColor(0x3FE0, 0x0842);
+    spr.drawString(statBuf, SCREEN_W / 2, hudY + 110, 2);
+
+    // 4. Return Guidance at Bottom
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_BG);
+    spr.drawString("[ TAP 2x / KEY 1 TO RETURN ]", SCREEN_W / 2, SCREEN_H - 14, 2);
 }
 

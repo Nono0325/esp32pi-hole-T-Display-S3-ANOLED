@@ -32,6 +32,8 @@ th{background:#21262d;color:#8b949e}tr:hover td{background:#1c2128}
 .alias-tag{color:#3fb950;background:rgba(46,160,67,0.15);border:1px solid rgba(46,160,67,0.3);border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;white-space:nowrap}
 .alias-none{color:#6e7681;font-size:12px;font-style:italic}
 .edit-btn{text-decoration:none;font-size:12px;margin-left:4px;cursor:pointer}
+.badge-new{display:inline-block;background:#8957e5;color:#fff;border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;margin-left:4px;animation:pulse 1.5s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(137,87,229,0.7)}70%{box-shadow:0 0 0 6px rgba(137,87,229,0)}100%{box-shadow:0 0 0 0 rgba(137,87,229,0)}}
 button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:13px}
 button:hover{background:#30363d;border-color:#8b949e}.ban{color:#f85149}
 input,select{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:5px;padding:7px 9px}
@@ -69,6 +71,15 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
 
 <!-- ==================== 1. 儀表板總覽分頁 ==================== -->
 <div id="view-dash" class="tab-content active">
+  <div id=radaralert style="display:none;background:#2d1b4d;border:1px solid #a371f7;color:#d8b4fe;padding:10px 16px;border-radius:8px;margin-bottom:14px;align-items:center;gap:12px;box-shadow:0 0 15px rgba(163,113,247,0.25)">
+    <span style="font-size:22px;line-height:1">📡</span>
+    <div style="flex:1">
+      <b>區網入侵者雷達警報 (LAN Intruder Radar):</b>
+      <span id=radar_info style="margin-left:6px;font-weight:bold;color:#f0e6ff">偵測到新設備連線！</span>
+    </div>
+    <button onclick="dismissRadarAlert()" style="background:#3b2366;color:#e9d5ff;border-color:#a371f7;font-size:12px;padding:4px 10px">關閉警報</button>
+  </div>
+
   <div id=wanalert style="display:none;background:#3d1618;border:1px solid #da3633;color:#f85149;padding:10px 16px;border-radius:8px;margin-bottom:14px;font-weight:600;align-items:center;gap:10px">
     <span style="font-size:20px;line-height:1">⚠️</span>
     <span style="flex:1">網際網路連線中斷警報：無法與上游外網 DNS 伺服器通訊，外網可能已斷線！</span>
@@ -233,6 +244,14 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
       <button onclick="setScreenPage(3)">第 3 頁: 攔截排行</button>
       <button onclick="setScreenPage(4)">第 4 頁: 硬體健康</button>
       <button onclick="setScreenPage(5)">第 5 頁: 掃碼連線</button>
+      <button onclick="setScreenPage(6)" style="background:#042f1a;color:#3fb950;border-color:#238636;font-weight:600">⚡ 第 6 頁: 駭客代碼雨屏保</button>
+    </div>
+
+    <div style="font-weight:600;margin-bottom:8px">硬體感測與雷達測試工具</div>
+    <div class="tool-row btn-grp" style="margin-bottom:14px">
+      <button onclick="triggerRadarTest()" style="background:#2d1b4d;color:#d8b4fe;border-color:#a371f7">📡 模擬區網雷達警報</button>
+      <button onclick="triggerGestureTest()" style="background:#1b3320;color:#3fb950;border-color:#238636">👆 模擬手勢輕敲翻頁 (Tap-Tap)</button>
+      <button onclick="flushDnsCache()" style="background:#1f6feb;color:#fff;border-color:#388bfd">⚡ 清空 DNS 快取 (Shake)</button>
     </div>
 
     <div style="font-weight:600;margin-bottom:8px">螢幕背光亮度與開機動畫</div>
@@ -533,6 +552,14 @@ async function load(){
       }
     }
 
+    // LAN Radar Alert Banner
+    if(s.radarAlert && window.radaralert && !window.radarDismissed){
+      radaralert.style.display = 'flex';
+      if(window.radar_info) radar_info.textContent = `偵測到新設備連線: [${s.radarAlert}]！請確認是否為已知家庭設備。`;
+    } else if(!s.radarAlert && window.radaralert && !window.radarDismissed){
+      radaralert.style.display = 'none';
+    }
+
     // Weather Header & Settings
     if(s.weather && s.weather.valid){
       let cName = s.weather.city || '台北';
@@ -588,7 +615,7 @@ async function load(){
       if(!row){row=document.createElement('tr');row.dataset.ip=c.ip;
       row.innerHTML=`<td class=cip></td><td class=cvendor></td><td class=calias></td><td class=cmac></td><td class="b cblk"></td><td class="a calw"></td><td><button class=ban data-ip="${c.ip}"></button></td>`;
       tb.appendChild(row);}
-      let ipH=esc(c.ip)+(c.banned?' <span class=tag style=color:#f85149>已封鎖</span>':'');
+      let ipH=esc(c.ip)+(c.banned?' <span class=tag style=color:#f85149>已封鎖</span>':'')+(c.isNew?' <span class=badge-new>NEW 雷達</span>':'');
       let tdIp=row.querySelector('.cip');if(tdIp.innerHTML!==ipH)tdIp.innerHTML=ipH;
       let vStr = c.vendor || '未知廠牌';
       let vendorH = `<span class="vendor-badge">${esc(vStr)}</span>`;
@@ -713,6 +740,19 @@ async function renameDev(ip, curAlias){
   let n = prompt('為設備 [' + ip + '] 設定自訂名稱/備註 (留空則清除自訂名稱):', curAlias||'');
   if(n === null) return;
   await fetch('/setdevname?ip='+encodeURIComponent(ip)+'&name='+encodeURIComponent(n), {headers: CSRF_HDRS});
+  load();
+}
+
+function dismissRadarAlert(){
+  window.radarDismissed = true;
+  if(window.radaralert) radaralert.style.display = 'none';
+}
+async function triggerRadarTest(){
+  await fetch('/radartest', {headers: CSRF_HDRS});
+  load();
+}
+async function triggerGestureTest(){
+  await fetch('/gesturetest', {headers: CSRF_HDRS});
   load();
 }
 
