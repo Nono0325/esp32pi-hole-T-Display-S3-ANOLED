@@ -172,14 +172,6 @@ static bool isBlocked(const char* domain) {
 }
 
 // ---------- persistence ----------
-static void loadCustom() {
-  numCustom = 0; File f = LittleFS.open("/custom.txt", "r"); if (!f) return;
-  while (f.available() && numCustom < MAX_CUSTOM) {
-    String l = f.readStringUntil('\n'); l.trim(); l.toLowerCase();
-    if (l.length() && l.indexOf('.') > 0) { customDom[numCustom] = l; customHash[numCustom] = fnv40(l.c_str(), l.length()); numCustom++; }
-  }
-  f.close();
-}
 static void saveCustom() { File f = LittleFS.open("/custom.txt", "w"); if (!f) return; for (int i = 0; i < numCustom; i++) f.println(customDom[i]); f.close(); }
 static bool addCustom(String d) {
   d.trim(); d.toLowerCase(); if (d.startsWith("www.")) d = d.substring(4);
@@ -192,6 +184,27 @@ static void removeCustom(String d) {
   for (int i = 0; i < numCustom; i++) if (customDom[i] == d) {
     for (int j = i; j < numCustom - 1; j++) { customDom[j] = customDom[j+1]; customHash[j] = customHash[j+1]; }
     numCustom--; saveCustom(); return;
+  }
+}
+static void loadCustom() {
+  numCustom = 0; File f = LittleFS.open("/custom.txt", "r");
+  if (f) {
+    while (f.available() && numCustom < MAX_CUSTOM) {
+      String l = f.readStringUntil('\n'); l.trim(); l.toLowerCase();
+      if (l.length() && l.indexOf('.') > 0) { customDom[numCustom] = l; customHash[numCustom] = fnv40(l.c_str(), l.length()); numCustom++; }
+    }
+    f.close();
+  }
+  if (numCustom == 0) {
+    static const char* const DEFAULT_ADS[] = {
+      "sitemaji.com", "exdynsrv.com", "exoclick.com", "aralego.com", "aralego.net",
+      "holmesmind.com", "appier.net", "dable.io", "guoshipartners.com", "onevision.com.tw",
+      "run-syndicate.com", "tamedia.com.tw", "googletagmanager.com", "google-analytics.com",
+      "popads.net", "adsterra.com", "propellerads.com", "mgid.com", "adtrue.com"
+    };
+    for (const char* d : DEFAULT_ADS) {
+      addCustom(d);
+    }
   }
 }
 static bool isBannedIP(uint32_t ip) { for (int i = 0; i < numBanned; i++) if (bannedIP[i] == ip) return true; return false; }
@@ -284,7 +297,7 @@ static bool handleDns() {
     size_t dl = parseQuery(buf, qlen, domain, &qtype, &qend);
     Dev* c = getClient((uint32_t)cip);
     bool ban = c && c->banned;
-    bool blocked = ban || (blockingOn && dl && numHashes && isBlocked(domain));
+    bool blocked = ban || (blockingOn && dl && (numHashes > 0 || numCustom > 0) && isBlocked(domain));
     int rlen;
     if (blocked) { rlen = buildBlocked(qend, qtype); totalBlocked++; if (c) c->blocked++; recordQueryActivity(true); }
     else         { rlen = forwardUpstream(qlen, qend);     totalAllowed++; if (c) c->allowed++; recordQueryActivity(false); }
