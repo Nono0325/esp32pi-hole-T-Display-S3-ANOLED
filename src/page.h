@@ -137,8 +137,8 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
 
   <h2>💻 連線設備列表 (Connected Clients)</h2>
   <table id=ct>
-    <colgroup><col style="width:26%"><col style="width:26%"><col style="width:18%"><col style="width:18%"><col style="width:12%"></colgroup>
-    <thead><tr><th>設備 IP</th><th>MAC 位址</th><th>已攔截廣告</th><th>已允許查詢</th><th>管理</th></tr></thead>
+    <colgroup><col style="width:18%"><col style="width:26%"><col style="width:22%"><col style="width:12%"><col style="width:12%"><col style="width:10%"></colgroup>
+    <thead><tr><th>設備 IP</th><th>識別名稱 / 廠牌</th><th>MAC 位址</th><th>已攔截廣告</th><th>已允許查詢</th><th>管理</th></tr></thead>
     <tbody></tbody>
   </table>
 </div>
@@ -229,7 +229,6 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
       <button onclick="setScreenPage(3)">第 3 頁: 攔截排行</button>
       <button onclick="setScreenPage(4)">第 4 頁: 硬體健康</button>
       <button onclick="setScreenPage(5)">第 5 頁: 掃碼連線</button>
-      <button onclick="setScreenPage(6)" style="border-color:#00f0ff;color:#00f0ff;font-weight:600">第 6 頁: ✧ WuW ✧ 賽博哨兵</button>
     </div>
 
     <div style="font-weight:600;margin-bottom:8px">螢幕背光亮度與開機動畫</div>
@@ -583,10 +582,13 @@ async function load(){
     s.clients.forEach(c=>{
       cur.add(c.ip);let row=tb.querySelector(`tr[data-ip="${c.ip}"]`);
       if(!row){row=document.createElement('tr');row.dataset.ip=c.ip;
-      row.innerHTML=`<td class=cip></td><td class=cmac></td><td class="b cblk"></td><td class="a calw"></td><td><button class=ban data-ip="${c.ip}"></button></td>`;
+      row.innerHTML=`<td class=cip></td><td class=cname style="font-weight:600"></td><td class=cmac></td><td class="b cblk"></td><td class="a calw"></td><td><button class=ban data-ip="${c.ip}"></button></td>`;
       tb.appendChild(row);}
       let ipH=esc(c.ip)+(c.banned?' <span class=tag style=color:#f85149>已封鎖</span>':'');
       let tdIp=row.querySelector('.cip');if(tdIp.innerHTML!==ipH)tdIp.innerHTML=ipH;
+      let dName = c.name || '未知裝置';
+      let nameH = `<span style="color:#58a6ff">${esc(dName)}</span> <a href="javascript:void(0)" onclick="renameDev('${esc(c.ip)}','${esc(c.alias||'')}')" title="設定自訂名稱" style="text-decoration:none;font-size:12px;margin-left:4px">✏️</a>`;
+      let tdName=row.querySelector('.cname');if(tdName.innerHTML!==nameH)tdName.innerHTML=nameH;
       let tdMac=row.querySelector('.cmac');if(tdMac.textContent!==c.mac)tdMac.textContent=c.mac;
       let tdB=row.querySelector('.cblk'),bS=fmt(c.blocked);if(tdB.textContent!==bS)tdB.textContent=bS;
       let tdA=row.querySelector('.calw'),aS=fmt(c.allowed);if(tdA.textContent!==aS)tdA.textContent=aS;
@@ -600,7 +602,8 @@ async function load(){
         let st = l.b ? '<span class=badge-blk>已攔截</span>' : (l.loc ? '<span class=badge-local>區網解析</span>' : '<span class=badge-alw>已轉發</span>');
         let act = l.b ? `<button class="alwbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+白名單</button>`
                       : `<button class="blkbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+黑名單</button>`;
-        return `<tr><td style="color:#8b949e">${l.t ? (l.t%86400<10?'0':'')+Math.floor((l.t%3600)/60)+'分 '+(l.t%60)+'秒' : '剛剛'}</td><td>${esc(l.ip)}</td><td title="${esc(l.d)}">${esc(l.d)}</td><td>${st}</td><td>${act}</td></tr>`;
+        let devLabel = l.name ? `<br><small style="color:#58a6ff">${esc(l.name)}</small>` : '';
+        return `<tr><td style="color:#8b949e">${l.t ? (l.t%86400<10?'0':'')+Math.floor((l.t%3600)/60)+'分 '+(l.t%60)+'秒' : '剛剛'}</td><td><b>${esc(l.ip)}</b>${devLabel}</td><td title="${esc(l.d)}">${esc(l.d)}</td><td>${st}</td><td>${act}</td></tr>`;
       }).join('');
     }
 
@@ -697,6 +700,12 @@ document.addEventListener('click',e=>{
 function saveUpd(){fetch('/setupdate?u='+encodeURIComponent(uurl.value.trim())+'&h='+(parseInt(uiv.value)||24),{headers:CSRF_HDRS}).then(load)}
 function fetchNow(){ustat.textContent='下載更新中...';fetch('/fetchnow',{headers:CSRF_HDRS}).then(r=>r.text()).then(t=>{ustat.textContent=t;load()})}
 function forgetWifi(){fetch('/forgetwifi',{headers:CSRF_HDRS}).then(r=>r.text()).then(t=>alert(t))}
+async function renameDev(ip, curAlias){
+  let n = prompt('設定此設備自訂名稱 (留空則還原預設廠牌識別):', curAlias||'');
+  if(n === null) return;
+  await fetch('/setdevname?ip='+encodeURIComponent(ip)+'&name='+encodeURIComponent(n), {headers: CSRF_HDRS});
+  load();
+}
 
 fwf.onsubmit=async e=>{e.preventDefault();let f=fwb.files[0];if(!f)return;fwmsg.textContent='正在刷寫韌體 '+(f.size/1048576).toFixed(2)+' MB...';
   let fd=new FormData();fd.append('f',f);

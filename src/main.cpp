@@ -21,6 +21,7 @@
                        // have been provisioned via the captive portal (copy secrets.example.h)
 #include "display.h"   // T-Display-S3 AMOLED Screen & Interaction
 #include "imu.h"       // Gravity IMU auto-rotation & screen flip
+#include "device_id.h" // Smart Device Fingerprinting & Custom Aliases
 
 // ---- config ----
 #ifndef UPSTREAM_IP
@@ -551,13 +552,36 @@ static void getMac(uint32_t ip, uint8_t* mac) {
     if (etharp_find_addr(nif, &ipa, &eth, &ipret) >= 0 && eth) { memcpy(mac, eth->addr, 6); return; }
 }
 static Dev* getClient(uint32_t ip) {
-  for (int i = 0; i < numClients; i++) if (clients[i].ip == ip) { clients[i].lastSeen = millis(); return &clients[i]; }
+  for (int i = 0; i < numClients; i++) {
+    if (clients[i].ip == ip) {
+      clients[i].lastSeen = millis();
+      if (clients[i].mac[0] == 0 && clients[i].mac[1] == 0 && clients[i].mac[2] == 0) {
+        getMac(ip, clients[i].mac);
+      }
+      return &clients[i];
+    }
+  }
   if (numClients < MAX_CLIENTS) {
     Dev* c = &clients[numClients++];
     c->ip = ip; c->blocked = c->allowed = 0; c->lastSeen = millis(); c->banned = isBannedIP(ip); c->label = "";
-    getMac(ip, c->mac); return c;
+    getMac(ip, c->mac);
+    return c;
   }
   return nullptr;
+}
+
+String getTopActiveDeviceName() {
+  if (numClients == 0) return "";
+  Dev* top = &clients[0];
+  uint32_t maxQ = top->blocked + top->allowed;
+  for (int i = 1; i < numClients; i++) {
+    uint32_t tot = clients[i].blocked + clients[i].allowed;
+    if (tot > maxQ) {
+      maxQ = tot;
+      top = &clients[i];
+    }
+  }
+  return getDeviceDisplayName(top->ip, top->mac);
 }
 
 // ---------- DNS ----------
@@ -824,8 +848,15 @@ static void handleStats() {
              ",\"defcreds\":" + (isDef ? "true" : "false") +
              ",\"webuser\":\"" + jesc(currentWebUser) + "\"" +
              ",\"clients\":[";
-  for (int i = 0; i < numClients; i++) { Dev& c = clients[i]; IPAddress ip(c.ip);
-    j += (i ? "," : ""); j += "{\"ip\":\"" + ip.toString() + "\",\"mac\":\"" + macStr(c.mac) + "\",\"blocked\":" + c.blocked + ",\"allowed\":" + c.allowed + ",\"banned\":" + (c.banned?"true":"false") + "}"; }
+  for (int i = 0; i < numClients; i++) {
+    Dev& c = clients[i];
+    IPAddress ip(c.ip);
+    String devName = getDeviceDisplayName(c.ip, c.mac);
+    String devVendor = getDeviceVendor(c.mac);
+    String devAlias = getDeviceAlias(c.ip);
+    j += (i ? "," : "");
+    j += "{\"ip\":\"" + ip.toString() + "\",\"mac\":\"" + macStr(c.mac) + "\",\"name\":\"" + jesc(devName) + "\",\"vendor\":\"" + jesc(devVendor) + "\",\"alias\":\"" + jesc(devAlias) + "\",\"blocked\":" + c.blocked + ",\"allowed\":" + c.allowed + ",\"banned\":" + (c.banned?"true":"false") + "}";
+  }
   j += "],\"custom\":[";
   for (int i = 0; i < numCustom; i++) { j += (i ? "," : ""); j += "\"" + jesc(customDom[i]) + "\""; }
   j += "],\"allow\":[";
@@ -864,8 +895,10 @@ static void handleStats() {
     int idx = (logHead - 1 - i + MAX_LOGS) % MAX_LOGS;
     QueryLog& l = queryLogs[idx];
     IPAddress cip(l.clientIp);
+    Dev* c = getClient(l.clientIp);
+    String devName = c ? getDeviceDisplayName(c->ip, c->mac) : getDeviceDisplayName(l.clientIp, nullptr);
     j += (i ? "," : "");
-    j += "{\"d\":\"" + jesc(l.domain) + "\",\"ip\":\"" + cip.toString() + "\",\"b\":" + (l.blocked ? "true" : "false") + ",\"loc\":" + (l.isLocal ? "true" : "false") + ",\"t\":" + String(l.timeSec) + "}";
+    j += "{\"d\":\"" + jesc(l.domain) + "\",\"ip\":\"" + cip.toString() + "\",\"name\":\"" + jesc(devName) + "\",\"b\":" + (l.blocked ? "true" : "false") + ",\"loc\":" + (l.isLocal ? "true" : "false") + ",\"t\":" + String(l.timeSec) + "}";
   }
   j += "]}";
   web.send(200, "application/json", j);
@@ -1282,6 +1315,7 @@ void setup() {
     buildFlashIndex();
   }
   loadCustom(); loadAllow(); loadBanned(); loadUpdateCfg(); loadUpstream(); loadWeatherCfg(); loadLocalDns();
+  initDeviceManager();
   Serial.printf("custom: %d, allow: %d, banned: %d, localdns: %d, upstream: %s:%d, city: %s\n",
                 numCustom, numAllow, numBanned, numLocalDns, upstreamIP.toString().c_str(), upstreamPort, weatherCity.c_str());
 
@@ -1333,6 +1367,20 @@ void setup() {
   web.on("/dnstest", handleDnsTest);
   web.on("/flushcache", handleFlushCache);
   web.on("/setpage", handleSetPage);
+  web.on("/setdevname", []() {
+    if (!requireAuth()) return;
+    if (!web.hasArg("ip")) { web.send(400, "text/plain", "missing ip"); return; }
+    String ipStr = web.arg("ip");
+    String nameStr = web.hasArg("name") ? web.arg("name") : "";
+    nameStr.trim();
+    setDeviceAlias(ipStr, nameStr);
+    IPAddress ip;
+    if (ip.fromString(ipStr)) {
+      Dev* c = getClient((uint32_t)ip);
+      if (c) c->label = nameStr;
+    }
+    web.send(200, "text/plain", "ok");
+  });
   web.on("/setbrightness", handleSetBrightness);
   web.on("/sleep", handleSleep);
   web.on("/wakeup", handleWakeup);

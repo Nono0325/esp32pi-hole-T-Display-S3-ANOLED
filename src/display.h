@@ -45,7 +45,7 @@ void resetActivityTimer();
 // Internet Sentinel connectivity status & ping latency
 void setInternetStatus(bool online, int32_t rttMs);
 
-// Current page index (0: Overview, 1: DNS Activity, 2: Clock & Weather, 3: Top Blocked, 4: System Health, 5: QR Portal, 6: Cyber Sentinel)
+// Current page index (0: Overview, 1: DNS Activity, 2: Clock & Weather, 3: Top Blocked, 4: System Health, 5: QR Portal)
 extern uint8_t currentPage;
 
 // Play / Replay NonoWuW Cyber Boot Animation

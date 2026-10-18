@@ -2,6 +2,7 @@
 #include "rm67162.h"
 #include "pins_config.h"
 #include "imu.h"
+#include "device_id.h"
 #include <TFT_eSPI.h>
 #include <OneButton.h>
 #include <Wire.h>
@@ -37,6 +38,7 @@ extern String updateUrl;
 extern bool fetchBlocklist(String url);
 extern String upstreamName;
 extern int numLocalDns;
+extern String getTopActiveDeviceName();
 
 // Internet connectivity sentinel status
 static bool netIsOnline = true;
@@ -72,7 +74,7 @@ static OneButton btn2(PIN_BUTTON_2, true); // User Key (GPIO 21)
 
 // Navigation & Brightness State
 uint8_t currentPage = 0;
-static const uint8_t MAX_PAGES = 7;
+static const uint8_t MAX_PAGES = 6;
 static uint8_t brightnessLevels[] = {255, 170, 75, 15};
 static uint8_t brightnessIndex = 1; // Default to 66% (170) to reduce AMOLED heat and power draw
 static bool screenAsleep = false;
@@ -113,7 +115,6 @@ static void drawPageClockWeather();
 static void drawPageTopBlocked();
 static void drawPageSystem();
 static void drawPageQR();
-static void drawPageCyberSentinel();
 static void drawHeader(const char* title, uint16_t titleColor);
 static void drawFooter();
 static void drawToast();
@@ -566,7 +567,6 @@ void initDisplay() {
 
     // 4. Configure Buttons
     btn1.attachClick(onBtn1Click);
-    btn1.attachDoubleClick(replayBootAnimation); // Double-click Button 1 (BOOT) to replay Cyber Boot Animation!
     btn1.attachLongPressStart(onBtn1LongPress);
     btn2.attachClick(onBtn2Click);
     btn2.attachDoubleClick(flipScreen180); // Double-click Button 2 to flip 180 degrees
@@ -700,7 +700,6 @@ void updateDisplay(bool force) {
         case 3: drawPageTopBlocked();    break;
         case 4: drawPageSystem();        break;
         case 5: drawPageQR();            break;
-        case 6: drawPageCyberSentinel(); break;
     }
 
     drawToast();
@@ -743,12 +742,12 @@ static void drawFooter() {
     // Help prompts
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString("[KEY 1] Page (1-7)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
+    spr.drawString("[KEY 1] Page (1-6)  [KEY 2] Pause | 2x: Flip 180", 14, 215, 2);
 
-    // Page indicator dots (7 dots)
+    // Page indicator dots (6 dots)
     spr.setTextDatum(TR_DATUM);
     for (int i = 0; i < MAX_PAGES; i++) {
-        int dotX = SCREEN_W - 110 + (i * 14);
+        int dotX = SCREEN_W - 96 + (i * 14);
         if (i == currentPage) {
             spr.fillCircle(dotX, 222, 4, COLOR_CYAN);
         } else {
@@ -891,7 +890,14 @@ static void drawPageOverview() {
 
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    spr.drawString("Active LAN Devices", cardX3 + 12, cardY + 76, 2);
+    String topDev = getTopActiveDeviceName();
+    if (topDev.length() > 0) {
+        if (topDev.length() > 18) topDev = topDev.substring(0, 18);
+        spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+        spr.drawString(topDev, cardX3 + 12, cardY + 76, 2);
+    } else {
+        spr.drawString("Active LAN Devices", cardX3 + 12, cardY + 76, 2);
+    }
     char upStr[32];
     snprintf(upStr, sizeof(upStr), "Uptime: %luh", (millis() / 3600000UL));
     spr.drawString(upStr, cardX3 + 12, cardY + 96, 1);
@@ -1432,134 +1438,3 @@ static void drawToast() {
     }
 }
 
-static void drawPageCyberSentinel() {
-    drawHeader("NONOWUW CYBER SENTINEL", COLOR_CYAN);
-
-    uint32_t ms = millis();
-
-    // 1. Dynamic Breathing Glow Color
-    uint16_t glowColors[] = {COLOR_CYAN, 0xF81F, COLOR_GREEN, 0xFD20};
-    uint8_t colorIdx = (ms / 3000) % 4;
-    uint16_t activeGlow = glowColors[colorIdx];
-
-    // 2. Dynamic Mascot Expressions:
-    // ( ✧ WuW ✧ ) -> ( ★ ω ★ ) -> ( ✧ ω < ) -> ( ˘ ω ˘ )
-    uint8_t exprIdx = (ms / 4000) % 4;
-
-    // ==================== LEFT ZONE: NonoWuW Cyber Mascot Showcase ====================
-    int cx = 138;
-    int cy = 100;
-    float scale = 0.82f;
-
-    // Orbiting cyber energy particles around logo
-    float t = (float)(ms % 3000) / 3000.0f;
-    for (int p = 0; p < 4; p++) {
-        float angle = t * 6.28318f + (float)p * 1.57079f;
-        int px = cx + (int)(cos(angle) * 118.0f);
-        int py = cy + (int)(sin(angle) * 42.0f);
-        if (px >= 14 && px <= 262 && py >= 32 && py <= 156) {
-            spr.fillCircle(px, py, 2, activeGlow);
-        }
-    }
-
-    // Render NonoWuW Cyber Logo
-    drawNonoWuWLogo(cx, cy, scale, activeGlow, exprIdx, true);
-
-    // Status Pill Ribbon below Logo (y: 158 to 198)
-    int ribW = 236;
-    int ribH = 38;
-    int ribX = cx - ribW / 2; // 20
-    int ribY = 158;
-    spr.fillRoundRect(ribX, ribY, ribW, ribH, 8, COLOR_CARD);
-    spr.drawRoundRect(ribX, ribY, ribW, ribH, 8, COLOR_CARD_BORDER);
-
-    // Status LED indicator
-    bool blinkLed = ((ms / 500) % 2) == 0;
-    spr.fillCircle(ribX + 16, ribY + ribH / 2, 4, blinkLed ? COLOR_GREEN : 0x03E0);
-
-    spr.setTextDatum(ML_DATUM);
-    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
-    spr.drawString("SENTINEL ARMED", ribX + 28, ribY + 12, 2);
-
-    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    spr.drawString("Quantum Core • Defense Active", ribX + 28, ribY + 27, 1);
-
-    // ==================== CENTER DIVIDER ====================
-    spr.drawFastVLine(268, 34, 166, COLOR_CARD_BORDER);
-    spr.drawFastVLine(268, 80, 74, activeGlow);
-    spr.drawCircle(268, 117, 3, activeGlow);
-
-    // ==================== RIGHT ZONE: Dual Telemetry Cards ====================
-    int cardX = 276;
-    int cardW = SCREEN_W - cardX - 12; // 248px
-    int cardH = 78;
-    int cardY1 = 34;
-    int cardY2 = 122;
-
-    uint32_t totalQueries = totalBlocked + totalAllowed;
-    float blockRate = (totalQueries > 0) ? ((float)totalBlocked * 100.0f / totalQueries) : 0.0f;
-
-    // --- Card 1: Defense & Blocking Metrics (y: 34 to 112) ---
-    spr.fillRoundRect(cardX, cardY1, cardW, cardH, 8, COLOR_CARD);
-    spr.drawRoundRect(cardX, cardY1, cardW, cardH, 8, COLOR_CARD_BORDER);
-    spr.drawFastHLine(cardX + 12, cardY1 + 2, cardW - 24, COLOR_RED);
-
-    spr.setTextDatum(TL_DATUM);
-    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    spr.drawString("BLOCKED ADS", cardX + 12, cardY1 + 10, 1);
-
-    spr.setTextColor(COLOR_RED, COLOR_CARD);
-    char bStr[24];
-    snprintf(bStr, sizeof(bStr), "%lu", totalBlocked);
-    spr.drawString(bStr, cardX + 12, cardY1 + 24, 4);
-
-    // Block rate pill badge
-    spr.fillRoundRect(cardX + cardW - 88, cardY1 + 24, 76, 22, 5, 0x3000);
-    spr.drawRoundRect(cardX + cardW - 88, cardY1 + 24, 76, 22, 5, COLOR_RED);
-    spr.setTextDatum(MC_DATUM);
-    spr.setTextColor(COLOR_RED, 0x3000);
-    char pctStr[16];
-    snprintf(pctStr, sizeof(pctStr), "%.1f%%", blockRate);
-    spr.drawString(pctStr, cardX + cardW - 50, cardY1 + 35, 2);
-
-    spr.setTextDatum(TL_DATUM);
-    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    char qStr[48];
-    snprintf(qStr, sizeof(qStr), "Total: %lu queries  (%lu ok)", totalQueries, totalAllowed);
-    spr.drawString(qStr, cardX + 12, cardY1 + 58, 1);
-
-    // --- Card 2: Quantum SoC & Hardware Health (y: 122 to 200) ---
-    spr.fillRoundRect(cardX, cardY2, cardW, cardH, 8, COLOR_CARD);
-    spr.drawRoundRect(cardX, cardY2, cardW, cardH, 8, COLOR_CARD_BORDER);
-    spr.drawFastHLine(cardX + 12, cardY2 + 2, cardW - 24, COLOR_CYAN);
-
-    spr.setTextDatum(TL_DATUM);
-    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    spr.drawString("QUANTUM HARDWARE", cardX + 12, cardY2 + 10, 1);
-
-    float temp = temperatureRead();
-    uint16_t tColor = (temp < 50.0f) ? COLOR_GREEN : (temp < 70.0f ? COLOR_AMBER : COLOR_RED);
-    spr.setTextColor(tColor, COLOR_CARD);
-    char tStr[24];
-    snprintf(tStr, sizeof(tStr), "CPU: %.1f C", temp);
-    spr.drawString(tStr, cardX + 12, cardY2 + 26, 2);
-
-    spr.setTextDatum(TL_DATUM);
-    char pStr[24];
-    if (netIsOnline && netRttMs >= 0) {
-        snprintf(pStr, sizeof(pStr), "WAN: %ldms", (long)netRttMs);
-        spr.setTextColor(COLOR_GREEN, COLOR_CARD);
-    } else {
-        snprintf(pStr, sizeof(pStr), "WAN: OFFLINE");
-        spr.setTextColor(COLOR_RED, COLOR_CARD);
-    }
-    spr.drawString(pStr, cardX + 130, cardY2 + 26, 2);
-
-    spr.setTextDatum(TL_DATUM);
-    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    char subStr[64];
-    snprintf(subStr, sizeof(subStr), "Rate: %.1f q/s (%.1f KB/s) | Peak: %.1f", currentQps, currentBps / 1024.0f, peakQps);
-    spr.drawString(subStr, cardX + 12, cardY2 + 58, 1);
-
-    drawFooter();
-}
