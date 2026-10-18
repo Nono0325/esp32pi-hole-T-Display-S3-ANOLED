@@ -1,4 +1,4 @@
-# Manhuagui (tw.manhuagui.com) & Asian Comic ad domains
+# Comprehensive Asian Comic & Manga ad networks
 sitemaji.com
 ad.sitemaji.com
 logs.sitemaji.com
@@ -17,6 +17,7 @@ aralego.net
 cdn.aralego.net
 holmesmind.com
 cdn.holmesmind.com
+ad.holmesmind.com
 appier.net
 ad2.apx.appier.net
 apn.c.appier.net
@@ -44,7 +45,34 @@ trafficjunky.com
 adcash.com
 ero-advertising.com
 feebee.tw
+fsa-api.feebee.tw
 doubleclick.net
+securepubads.g.doubleclick.net
+ad.doubleclick.net
 googlesyndication.com
 googleadservices.com
 adservice.google.com
+me-pppmp.com
+adcall.me-pppmp.com
+static.me-pppmp.com
+ad2iction.com
+content.ad2iction.com
+vpon.com
+m.vpon.com
+vm5apis.com
+man.vm5apis.com
+vawpro.vm5apis.com
+cashewgamee.com
+game4.cashewgamee.com
+call-beat.com
+mbtihy2.call-beat.com
+clarity.ms
+criteo.com
+criteo.net
+taboola.com
+outbrain.com
+popcash.net
+exosrv.com
+tsyndicate.com
+realsrv.com
+scorecardresearch.com
