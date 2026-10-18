@@ -1,8 +1,21 @@
-# esp32-c3-adblock
+# 🛡️ esp32pi-hole-T-Display-S3-AMOLED
 
-[日本語 README](README_JP.md)
+> 📢 **本專案移植與修改來源 (Attribution & Fork Source)**:
+> - 原專案核心 (Original Upstream): [M-Abozaid/esp32-c3-adblock](https://github.com/M-Abozaid/esp32-c3-adblock) (Pi-hole-style DNS ad-blocker for ESP32)
+> - 硬體與螢幕驅動參考 (Hardware Display Driver): [Xinyuan-LilyGO/T-Display-S3-AMOLED](https://github.com/Xinyuan-LilyGO/T-Display-S3-AMOLED)
+> 
+> 📖 **完整中文說明與硬體操作手冊請見：[README_T_DISPLAY_S3_AMOLED.md](README_T_DISPLAY_S3_AMOLED.md)**
+>
+> 🌟 **移植特色**:
+> 1. 適配 **LilyGO T-Display-S3 AMOLED** (1.91" 536×240 RM67162 QSPI 螢幕, 16MB Flash, 8MB PSRAM)
+> 2. **4 大 AMOLED 即時監控儀表板**（總覽、即時雙色流量柱狀圖、系統/記憶體/溫度健康卡、手機直連動態 QR Code）
+> 3. **重力感測 (IMU) 自動 180° 翻轉**（支援 MPU6050、QMA6100、LIS3DH、BMA423、LSM6DS 等）
+> 4. **實體按鍵控制**（單擊切換頁面/暫停、雙擊手動 180° 翻轉、長按亮度循環）
+> 5. **平滑穩定的 Web Dashboard**（零 DOM 銷毀、零跳動與閃爍、支援手機一鍵遠端翻轉）
 
-A **Pi-hole-style DNS ad-blocker** that runs on a **$2 ESP32-C3** — *no PSRAM required*.
+---
+
+# Original esp32-c3-adblock Overview
 
 > 📰 Featured on [Tom's Hardware](https://www.tomshardware.com/networking/clever-hacker-fits-537-000-domains-in-a-tiny-usd5-esp32-ad-blocking-dongle-firmware-uses-only-around-50kb-of-ram-and-can-answer-blocked-lookups-in-10-milliseconds), [XDA Developers](https://www.xda-developers.com/this-tiny-esp32-powered-gadget-blocks-537000-domains-only-uses-50kb-of-ram/), and [Korben](https://korben.info/en/half-million-ad-blocking-domains-50kb-ram-esp32.html).
 

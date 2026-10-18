@@ -19,6 +19,8 @@
 #include "lwip/netif.h"
 #include "secrets.h"   // WIFI_SSID / WIFI_PASS — used only as a FALLBACK if no creds
                        // have been provisioned via the captive portal (copy secrets.example.h)
+#include "display.h"   // T-Display-S3 AMOLED Screen & Interaction
+#include "imu.h"       // Gravity IMU auto-rotation & screen flip
 
 // ---- config ----
 #ifndef UPSTREAM_IP
@@ -284,8 +286,8 @@ static bool handleDns() {
     bool ban = c && c->banned;
     bool blocked = ban || (blockingOn && dl && numHashes && isBlocked(domain));
     int rlen;
-    if (blocked) { rlen = buildBlocked(qend, qtype); totalBlocked++; if (c) c->blocked++; }
-    else         { rlen = forwardUpstream(qlen, qend);     totalAllowed++; if (c) c->allowed++; }
+    if (blocked) { rlen = buildBlocked(qend, qtype); totalBlocked++; if (c) c->blocked++; recordQueryActivity(true); }
+    else         { rlen = forwardUpstream(qlen, qend);     totalAllowed++; if (c) c->allowed++; recordQueryActivity(false); }
     if (rlen > 0) { dnsServer.beginPacket(cip, cport); dnsServer.write(buf, rlen); dnsServer.endPacket(); }
   }
   return did;
@@ -322,9 +324,10 @@ static void handleStats() {
   char ut[24]; snprintf(ut, sizeof(ut), "%lud %luh %lum", up/86400, (up%86400)/3600, (up%3600)/60);
   String j = "{\"ip\":\"" + WiFi.localIP().toString() + "\",\"blocked\":" + totalBlocked + ",\"allowed\":" + totalAllowed +
              ",\"domains\":" + numHashes + ",\"rssi\":" + WiFi.RSSI() + ",\"temp\":" + String(temperatureRead(), 1) +
-             ",\"heap\":" + ESP.getFreeHeap() + ",\"uptime\":\"" + ut + "\"" +
+             ",\"heap\":" + ESP.getFreeHeap() + ",\"psram\":" + ESP.getFreePsram() + ",\"uptime\":\"" + ut + "\"" +
              ",\"upurl\":\"" + jesc(updateUrl) + "\",\"upiv\":" + updateIntervalH + ",\"upstat\":\"" + jesc(updateStatus) + "\"" +
              ",\"blocking\":" + (blockingOn ? "true" : "false") +
+             ",\"rot\":" + String(getCurrentRotation()) + ",\"imu\":\"" + String(getIMUName()) + "\"" +
              ",\"resumeIn\":" + (uint32_t)(!blockingOn && resumeAt ? (resumeAt - millis()) / 1000 : 0) +
              ",\"defcreds\":" + ((strcmp(WEB_PASS, "CHANGE_ME_WEB_PASSWORD") == 0 || strcmp(OTA_PASS, "CHANGE_ME_OTA_PASSWORD") == 0) ? "true" : "false") +
              ",\"clients\":[";
@@ -434,7 +437,7 @@ static void saveUpdateCfg() {
   File f = LittleFS.open("/update.cfg", "w"); if (!f) return;
   f.println(updateUrl); f.println(updateIntervalH); f.close();
 }
-static bool fetchBlocklist(String url) {
+bool fetchBlocklist(String url) {
   url.trim(); if (!url.length()) { updateStatus = "no url set"; return false; }
   Serial.printf("[remote] GET %s\n", url.c_str());
   WiFiClientSecure cs; cs.setInsecure();            // blocklist isn't secret -> skip cert pinning
@@ -554,12 +557,16 @@ static void startConfigPortal() {
   web.begin();
   Serial.printf("\n[setup] No WiFi. Join open network \"%s\" and a setup page pops up (or http://%s)\n",
                 ap, apIP.toString().c_str());
+  char toastBuf[64];
+  snprintf(toastBuf, sizeof(toastBuf), "SETUP: Join '%s'", ap);
+  displayToast(toastBuf, 180000UL);
   // A configured device that merely failed to join (router rebooting, weak signal) must not
   // get stuck here: if nobody is using the portal, reboot and retry WiFi every 3 minutes.
   const bool configured = hasCreds();
   uint32_t t0 = millis();
   while (true) {
     dnsPortal.processNextRequest(); web.handleClient(); delay(2);
+    updateDisplay();
     if (WiFi.softAPgetStationNum() > 0) t0 = millis();          // someone is setting it up
     if (configured && millis() - t0 > 180000UL) { Serial.println("[setup] retrying WiFi"); ESP.restart(); }
   }
@@ -567,7 +574,8 @@ static void startConfigPortal() {
 
 void setup() {
   Serial.begin(115200); delay(300);
-  Serial.println("\n[c3-adblock] booting");
+  initDisplay();
+  Serial.println("\n[t-display-s3-adblock] booting");
   if (!LittleFS.begin(true)) Serial.println("LittleFS FAILED");
   blocklist = LittleFS.open(BLOCKLIST_PATH, "r");
   if (blocklist) {
@@ -582,7 +590,7 @@ void setup() {
 #if CONFIG_IDF_TARGET_ESP32C3
   const int BOOT_PIN = 9;     // C3 BOOT button
 #else
-  const int BOOT_PIN = 0;     // classic ESP32 BOOT button (GPIO9 is a flash pin there)
+  const int BOOT_PIN = 0;     // classic ESP32 / S3 BOOT button
 #endif
   pinMode(BOOT_PIN, INPUT_PULLUP);
   if (digitalRead(BOOT_PIN) == LOW) { delay(60);
@@ -609,14 +617,16 @@ void setup() {
     if (!requireAuth()) return;
     long s = web.hasArg("s") ? web.arg("s").toInt() : 0;
     blockingOn = false; resumeAt = (s > 0) ? millis() + (uint32_t)s * 1000UL : 0;
+    displayToast("PAUSED (WEB)", 2500);
     web.send(200, "text/plain", "paused");
   });
-  web.on("/resume", []() { if (!requireAuth()) return; blockingOn = true; resumeAt = 0; web.send(200, "text/plain", "resumed"); });
+  web.on("/resume", []() { if (!requireAuth()) return; blockingOn = true; resumeAt = 0; displayToast("RESUMED (WEB)", 2500); web.send(200, "text/plain", "resumed"); });
+  web.on("/flip", []() { if (!requireAuth()) return; flipScreen180(); web.send(200, "text/plain", "flipped"); });
   web.on("/forgetwifi", []() { if (!requireAuth()) return; web.send(200, "text/plain", "cleared — rebooting into setup portal");
     prefs.begin("wifi", false); prefs.clear(); prefs.end(); delay(500); ESP.restart(); });
   web.on("/upload", HTTP_POST, handleUploadDone, handleUpload);      // blocklist OTA (auth inside handleUpload)
   web.on("/update", HTTP_POST, handleFwUpdateDone, handleFwUpload);  // firmware OTA (auth inside handleFwUpload)
-  web.on("/fetchnow", []() { if (!requireAuth()) return; fetchBlocklist(updateUrl); web.send(200, "text/plain", updateStatus); });
+  web.on("/fetchnow", []() { if (!requireAuth()) return; displayToast("UPDATING (WEB)...", 2500); fetchBlocklist(updateUrl); web.send(200, "text/plain", updateStatus); });
   web.on("/setupdate", []() {
     if (!requireAuth()) return;
     if (web.hasArg("u")) updateUrl = web.arg("u");
@@ -640,5 +650,6 @@ void loop() {
     if (lastCheckMs == 0) lastCheckMs = now;   // skip an immediate fetch on boot
     else if (now - lastCheckMs >= updateIntervalH * 3600000UL) { lastCheckMs = now; fetchBlocklist(updateUrl); }
   }
+  updateDisplay();
   if (!busy) delay(1);   // sleep only when idle: full speed under load, cool when quiet
 }
