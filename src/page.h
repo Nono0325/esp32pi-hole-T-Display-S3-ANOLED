@@ -28,6 +28,10 @@ th{background:#21262d;color:#8b949e}tr:hover td{background:#1c2128}
 .badge-blk{background:#3b1d1d;color:#f85149;border:1px solid #da3633;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600}
 .badge-alw{background:#1b3320;color:#3fb950;border:1px solid #2ea043;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600}
 .badge-local{background:#0d3846;color:#58a6ff;border:1px solid #1f6feb;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600}
+.vendor-badge{display:inline-flex;align-items:center;background:#1c2128;color:#58a6ff;border:1px solid #30363d;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap}
+.alias-tag{color:#3fb950;background:rgba(46,160,67,0.15);border:1px solid rgba(46,160,67,0.3);border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;white-space:nowrap}
+.alias-none{color:#6e7681;font-size:12px;font-style:italic}
+.edit-btn{text-decoration:none;font-size:12px;margin-left:4px;cursor:pointer}
 button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:13px}
 button:hover{background:#30363d;border-color:#8b949e}.ban{color:#f85149}
 input,select{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:5px;padding:7px 9px}
@@ -135,10 +139,10 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
   <div style="margin-bottom:8px"><input id=dom placeholder="輸入廣告網域，例如 ads.example.com" size=34><button onclick=addDom()>加入黑名單</button></div>
   <table id=cl><colgroup><col style="width:80%"><col style="width:20%"></colgroup><tbody></tbody></table>
 
-  <h2>💻 連線設備列表 (Connected Clients)</h2>
+  <h2>💻 連線設備與廠牌管理 (Connected Clients & Brands)</h2>
   <table id=ct>
-    <colgroup><col style="width:18%"><col style="width:26%"><col style="width:22%"><col style="width:12%"><col style="width:12%"><col style="width:10%"></colgroup>
-    <thead><tr><th>設備 IP</th><th>識別名稱 / 廠牌</th><th>MAC 位址</th><th>已攔截廣告</th><th>已允許查詢</th><th>管理</th></tr></thead>
+    <colgroup><col style="width:16%"><col style="width:20%"><col style="width:20%"><col style="width:18%"><col style="width:9%"><col style="width:9%"><col style="width:8%"></colgroup>
+    <thead><tr><th>設備 IP</th><th>設備廠牌 (Vendor)</th><th>自訂名稱 / 備註</th><th>MAC 位址</th><th>已攔截</th><th>已允許</th><th>管理</th></tr></thead>
     <tbody></tbody>
   </table>
 </div>
@@ -582,16 +586,19 @@ async function load(){
     s.clients.forEach(c=>{
       cur.add(c.ip);let row=tb.querySelector(`tr[data-ip="${c.ip}"]`);
       if(!row){row=document.createElement('tr');row.dataset.ip=c.ip;
-      row.innerHTML=`<td class=cip></td><td class=cname style="font-weight:600"></td><td class=cmac></td><td class="b cblk"></td><td class="a calw"></td><td><button class=ban data-ip="${c.ip}"></button></td>`;
+      row.innerHTML=`<td class=cip></td><td class=cvendor></td><td class=calias></td><td class=cmac></td><td class="b cblk"></td><td class="a calw"></td><td><button class=ban data-ip="${c.ip}"></button></td>`;
       tb.appendChild(row);}
       let ipH=esc(c.ip)+(c.banned?' <span class=tag style=color:#f85149>已封鎖</span>':'');
       let tdIp=row.querySelector('.cip');if(tdIp.innerHTML!==ipH)tdIp.innerHTML=ipH;
-      let dName = c.name || '未知裝置';
-      let nameH = `<span style="color:#58a6ff">${esc(dName)}</span> <a href="javascript:void(0)" onclick="renameDev('${esc(c.ip)}','${esc(c.alias||'')}')" title="設定自訂名稱" style="text-decoration:none;font-size:12px;margin-left:4px">✏️</a>`;
-      let tdName=row.querySelector('.cname');if(tdName.innerHTML!==nameH)tdName.innerHTML=nameH;
+      let vStr = c.vendor || '未知廠牌';
+      let vendorH = `<span class="vendor-badge">${esc(vStr)}</span>`;
+      let tdV=row.querySelector('.cvendor');if(tdV.innerHTML!==vendorH)tdV.innerHTML=vendorH;
+      let aliasStr = c.alias ? `<span class="alias-tag">${esc(c.alias)}</span>` : `<span class="alias-none">未設定</span>`;
+      let aliasH = `${aliasStr} <a href="javascript:void(0)" class="edit-btn" onclick="renameDev('${esc(c.ip)}','${esc(c.alias||'')}')" title="點此為設備設定自訂名稱">✏️</a>`;
+      let tdA=row.querySelector('.calias');if(tdA.innerHTML!==aliasH)tdA.innerHTML=aliasH;
       let tdMac=row.querySelector('.cmac');if(tdMac.textContent!==c.mac)tdMac.textContent=c.mac;
       let tdB=row.querySelector('.cblk'),bS=fmt(c.blocked);if(tdB.textContent!==bS)tdB.textContent=bS;
-      let tdA=row.querySelector('.calw'),aS=fmt(c.allowed);if(tdA.textContent!==aS)tdA.textContent=aS;
+      let tdAlw=row.querySelector('.calw'),aS=fmt(c.allowed);if(tdAlw.textContent!==aS)tdAlw.textContent=aS;
       let btn=row.querySelector('.ban'),wT=c.banned?'解除封鎖':'封鎖設備';if(btn.textContent!==wT)btn.textContent=wT;
     });
     Array.from(tb.children).forEach(r=>{if(r.dataset.ip&&!cur.has(r.dataset.ip))r.remove()});
@@ -602,8 +609,10 @@ async function load(){
         let st = l.b ? '<span class=badge-blk>已攔截</span>' : (l.loc ? '<span class=badge-local>區網解析</span>' : '<span class=badge-alw>已轉發</span>');
         let act = l.b ? `<button class="alwbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+白名單</button>`
                       : `<button class="blkbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+黑名單</button>`;
-        let devLabel = l.name ? `<br><small style="color:#58a6ff">${esc(l.name)}</small>` : '';
-        return `<tr><td style="color:#8b949e">${l.t ? (l.t%86400<10?'0':'')+Math.floor((l.t%3600)/60)+'分 '+(l.t%60)+'秒' : '剛剛'}</td><td><b>${esc(l.ip)}</b>${devLabel}</td><td title="${esc(l.d)}">${esc(l.d)}</td><td>${st}</td><td>${act}</td></tr>`;
+        let brandTag = l.vendor ? `<span class="vendor-badge" style="font-size:10px;padding:1px 5px">${esc(l.vendor)}</span>` : '';
+        let aliasTag = l.alias ? `<span class="alias-tag" style="font-size:10px;padding:1px 5px">${esc(l.alias)}</span>` : '';
+        let devMeta = (brandTag || aliasTag) ? `<div style="margin-top:2px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">${brandTag}${aliasTag}</div>` : '';
+        return `<tr><td style="color:#8b949e">${l.t ? (l.t%86400<10?'0':'')+Math.floor((l.t%3600)/60)+'分 '+(l.t%60)+'秒' : '剛剛'}</td><td><b>${esc(l.ip)}</b>${devMeta}</td><td title="${esc(l.d)}">${esc(l.d)}</td><td>${st}</td><td>${act}</td></tr>`;
       }).join('');
     }
 
@@ -701,7 +710,7 @@ function saveUpd(){fetch('/setupdate?u='+encodeURIComponent(uurl.value.trim())+'
 function fetchNow(){ustat.textContent='下載更新中...';fetch('/fetchnow',{headers:CSRF_HDRS}).then(r=>r.text()).then(t=>{ustat.textContent=t;load()})}
 function forgetWifi(){fetch('/forgetwifi',{headers:CSRF_HDRS}).then(r=>r.text()).then(t=>alert(t))}
 async function renameDev(ip, curAlias){
-  let n = prompt('設定此設備自訂名稱 (留空則還原預設廠牌識別):', curAlias||'');
+  let n = prompt('為設備 [' + ip + '] 設定自訂名稱/備註 (留空則清除自訂名稱):', curAlias||'');
   if(n === null) return;
   await fetch('/setdevname?ip='+encodeURIComponent(ip)+'&name='+encodeURIComponent(n), {headers: CSRF_HDRS});
   load();

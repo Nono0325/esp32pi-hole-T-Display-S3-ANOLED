@@ -892,9 +892,11 @@ static void drawPageOverview() {
     spr.setTextColor(COLOR_GRAY, COLOR_CARD);
     String topDev = getTopActiveDeviceName();
     if (topDev.length() > 0) {
-        if (topDev.length() > 18) topDev = topDev.substring(0, 18);
+        if (topDev.length() > 15) topDev = topDev.substring(0, 15);
         spr.setTextColor(COLOR_CYAN, COLOR_CARD);
-        spr.drawString(topDev, cardX3 + 12, cardY + 76, 2);
+        char topBuf[32];
+        snprintf(topBuf, sizeof(topBuf), "Top: %s", topDev.c_str());
+        spr.drawString(topBuf, cardX3 + 12, cardY + 76, 2);
     } else {
         spr.drawString("Active LAN Devices", cardX3 + 12, cardY + 76, 2);
     }

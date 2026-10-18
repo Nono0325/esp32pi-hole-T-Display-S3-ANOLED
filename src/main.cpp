@@ -581,7 +581,15 @@ String getTopActiveDeviceName() {
       top = &clients[i];
     }
   }
-  return getDeviceDisplayName(top->ip, top->mac);
+  String alias = getDeviceAlias(top->ip);
+  if (alias.length() > 0) {
+    bool isAscii = true;
+    for (size_t k = 0; k < alias.length(); k++) {
+      if ((uint8_t)alias[k] >= 128) { isAscii = false; break; }
+    }
+    if (isAscii) return alias;
+  }
+  return getDeviceVendorAscii(top->mac);
 }
 
 // ---------- DNS ----------
@@ -897,8 +905,10 @@ static void handleStats() {
     IPAddress cip(l.clientIp);
     Dev* c = getClient(l.clientIp);
     String devName = c ? getDeviceDisplayName(c->ip, c->mac) : getDeviceDisplayName(l.clientIp, nullptr);
+    String devVendor = c ? getDeviceVendor(c->mac) : "";
+    String devAlias = getDeviceAlias(l.clientIp);
     j += (i ? "," : "");
-    j += "{\"d\":\"" + jesc(l.domain) + "\",\"ip\":\"" + cip.toString() + "\",\"name\":\"" + jesc(devName) + "\",\"b\":" + (l.blocked ? "true" : "false") + ",\"loc\":" + (l.isLocal ? "true" : "false") + ",\"t\":" + String(l.timeSec) + "}";
+    j += "{\"d\":\"" + jesc(l.domain) + "\",\"ip\":\"" + cip.toString() + "\",\"name\":\"" + jesc(devName) + "\",\"vendor\":\"" + jesc(devVendor) + "\",\"alias\":\"" + jesc(devAlias) + "\",\"b\":" + (l.blocked ? "true" : "false") + ",\"loc\":" + (l.isLocal ? "true" : "false") + ",\"t\":" + String(l.timeSec) + "}";
   }
   j += "]}";
   web.send(200, "application/json", j);

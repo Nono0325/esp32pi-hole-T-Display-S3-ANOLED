@@ -3,8 +3,11 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 
-// Identify hardware manufacturer or device type based on MAC address
+// Identify hardware manufacturer or brand based on MAC address (with rich emoji/branding)
 String getDeviceVendor(const uint8_t* mac);
+
+// Pure ASCII brand string suitable for AMOLED screen built-in fonts (no UTF-8 / emoji)
+String getDeviceVendorAscii(const uint8_t* mac);
 
 // Load, save and get user-defined device aliases (persisted in LittleFS /aliases.txt)
 void initDeviceManager();
