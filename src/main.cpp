@@ -625,6 +625,8 @@ static void handleStats() {
        ",\"cond\":\"" + jesc(currentWeather.conditionStr) + "\",\"valid\":" + (currentWeather.valid ? "true" : "false") +
        ",\"city\":\"" + jesc(weatherCity) + "\",\"lat\":\"" + weatherLat + "\",\"lon\":\"" + weatherLon + "\"}";
   j += ",\"curPage\":" + String(currentPage);
+  j += ",\"screenAsleep\":" + String(isDisplaySleeping() ? "true" : "false");
+  j += ",\"sleepTimeout\":" + String(getSleepTimeout());
   j += ",\"logs\":[";
   int outCount = (logCount > 35) ? 35 : logCount;
   for (int i = 0; i < outCount; i++) {
@@ -744,6 +746,25 @@ static void handleSetBrightness() {
   if (!requireAuth()) return;
   uint8_t b = web.arg("b").toInt();
   setDisplayBrightness(b);
+  web.send(200, "text/plain", "ok");
+}
+
+static void handleSleep() {
+  if (!requireAuth()) return;
+  sleepDisplay();
+  web.send(200, "text/plain", "sleeping");
+}
+
+static void handleWakeup() {
+  if (!requireAuth()) return;
+  wakeupDisplay();
+  web.send(200, "text/plain", "awake");
+}
+
+static void handleSetSleepTimeout() {
+  if (!requireAuth()) return;
+  uint32_t s = web.hasArg("s") ? web.arg("s").toInt() : 0;
+  setSleepTimeout(s);
   web.send(200, "text/plain", "ok");
 }
 
@@ -1010,6 +1031,9 @@ void setup() {
   web.on("/flushcache", handleFlushCache);
   web.on("/setpage", handleSetPage);
   web.on("/setbrightness", handleSetBrightness);
+  web.on("/sleep", handleSleep);
+  web.on("/wakeup", handleWakeup);
+  web.on("/setsleep", handleSetSleepTimeout);
   web.on("/setweather", []() {
     if (!requireAuth()) return;
     String c = web.hasArg("city") ? web.arg("city") : "台北 (Taipei)";

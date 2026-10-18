@@ -24,5 +24,17 @@ void nextPage();
 // Set active page directly (0 to 5)
 void setDisplayPage(uint8_t page);
 
+// Screen sleep and wakeup controls
+void sleepDisplay();
+void wakeupDisplay();
+bool isDisplaySleeping();
+
+// Auto-sleep timeout in seconds (0 = never, 30, 60, 300, 600)
+void setSleepTimeout(uint32_t seconds);
+uint32_t getSleepTimeout();
+
+// Reset inactivity timer
+void resetActivityTimer();
+
 // Current page index (0: Overview, 1: DNS Activity, 2: Clock & Weather, 3: Top Blocked, 4: System Health, 5: QR Portal)
 extern uint8_t currentPage;

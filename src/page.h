@@ -179,8 +179,27 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
     <div id=wthrmsg class=section-desc>儲存後系統將自動連線 Open-Meteo 重新抓取並即時更新 AMOLED 螢幕時鐘天氣頁面。</div>
   </div>
 
-  <h2>🖥️ 3. AMOLED 螢幕顯示與偏好設定</h2>
+  <h2>🖥️ 3. AMOLED 螢幕顯示與休眠管理</h2>
   <div class=panel>
+    <div style="font-weight:600;margin-bottom:8px">螢幕休眠與電源管理 (AMOLED Sleep & Wake)</div>
+    <div class="tool-row" style="margin-bottom:12px;gap:10px;align-items:center;flex-wrap:wrap">
+      <span>自動休眠時間：</span>
+      <select id=sleeptout style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;padding:6px 10px;border-radius:6px">
+        <option value="0">永不休眠 (螢幕常亮)</option>
+        <option value="30">30 秒閒置後休眠</option>
+        <option value="60">1 分鐘閒置後休眠</option>
+        <option value="300" selected>5 分鐘閒置後休眠</option>
+        <option value="600">10 分鐘閒置後休眠</option>
+      </select>
+      <button onclick="saveSleepTimeout()" style="background:#238636;color:#fff;border-color:#2ea043">儲存休眠排程</button>
+      <button onclick="sleepNow()" style="background:#30363d;color:#c9d1d9">🌙 立即休眠</button>
+      <button onclick="wakeNow()" style="background:#1f6feb;color:#fff;border-color:#388bfd">☀️ 立即喚醒</button>
+      <span id=screenstate class=tag style="padding:4px 10px;border-radius:12px;font-size:12px;border:1px solid #238636;color:#3fb950;background:#142a1e">☀️ 螢幕顯示中</span>
+    </div>
+    <div class=section-desc style="margin-bottom:16px">
+      AMOLED 深度休眠關閉像素發光與驅動晶片，有效防止面板烙印並降低功耗與發熱。點擊實體按鍵、觸控螢幕或網頁隨時可立即喚醒。
+    </div>
+
     <div style="font-weight:600;margin-bottom:8px">螢幕畫面遠端切換</div>
     <div class="tool-row btn-grp" style="margin-bottom:14px">
       <button onclick="setScreenPage(0)">第 0 頁: 防護總覽</button>
@@ -271,6 +290,18 @@ function togglePause(){fetch(blockstate.dataset.on=='1'?'/pause?s='+pausedur.val
 function flipScreen(){fetch('/flip',{headers:CSRF_HDRS});}
 function setScreenPage(p){fetch('/setpage?p='+p,{headers:CSRF_HDRS});}
 function setBrightness(b){fetch('/setbrightness?b='+b,{headers:CSRF_HDRS});}
+function sleepNow(){fetch('/sleep',{headers:CSRF_HDRS}).then(load);}
+function wakeNow(){fetch('/wakeup',{headers:CSRF_HDRS}).then(load);}
+async function saveSleepTimeout(){
+  let s=sleeptout.value;
+  try{
+    let r=await fetch('/setsleep?s='+encodeURIComponent(s),{headers:CSRF_HDRS});
+    if(r.ok){
+      alert('已更新螢幕自動休眠設定！');
+      load();
+    }
+  }catch(_){}
+}
 function flushDnsCache(){fetch('/flushcache',{headers:CSRF_HDRS}).then(()=>{testres.innerHTML='<span style="color:#3fb950">✓ DNS 快取已成功清空！</span>';setTimeout(load,300);});}
 
 async function rebootDevice(){
@@ -411,6 +442,18 @@ async function load(){
       if(document.activeElement!=upip&&!upip.value)upip.value=s.upstream.ip;
       if(document.activeElement!=upport&&!upport.value)upport.value=s.upstream.port;
       if(document.activeElement!=upname&&!upname.value)upname.value=s.upstream.name;
+    }
+
+    // Screen Sleep & Timeout State
+    if(s.screenAsleep !== undefined && screenstate){
+      let asleep = (s.screenAsleep === true);
+      screenstate.textContent = asleep ? '🌙 螢幕休眠中' : '☀️ 螢幕顯示中';
+      screenstate.style.color = asleep ? '#a371f7' : '#3fb950';
+      screenstate.style.borderColor = asleep ? '#8957e5' : '#238636';
+      screenstate.style.background = asleep ? '#261b3d' : '#142a1e';
+    }
+    if(s.sleepTimeout !== undefined && sleeptout && document.activeElement != sleeptout){
+      sleeptout.value = s.sleepTimeout;
     }
 
     // Clients Table (in-place update)

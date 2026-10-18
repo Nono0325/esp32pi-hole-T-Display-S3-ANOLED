@@ -6,6 +6,7 @@
 #include <OneButton.h>
 #include <Wire.h>
 #include <qrcode.h>
+#include <Preferences.h>
 
 // Screen dimensions in landscape mode
 #define SCREEN_W 536
@@ -70,6 +71,11 @@ static uint8_t brightnessLevels[] = {255, 170, 75, 15};
 static uint8_t brightnessIndex = 0;
 static bool screenAsleep = false;
 
+// Sleep Timeout & Activity State (persisted in NVS "disp")
+static uint32_t sleepTimeoutSec = 300; // default 5 minutes (0 = never)
+static uint32_t lastActivityMs = 0;
+static Preferences dispPrefs;
+
 // Toast Notifications
 static String toastMsg = "";
 static uint32_t toastExpiry = 0;
@@ -97,6 +103,47 @@ static void drawFooter();
 static void drawToast();
 static void checkTouch();
 
+void resetActivityTimer() {
+    lastActivityMs = millis();
+}
+
+void sleepDisplay() {
+    if (screenAsleep) return;
+    screenAsleep = true;
+    lcd_sleep();
+    Serial.println("[display] AMOLED entered sleep mode (Display OFF & Sleep IN)");
+}
+
+void wakeupDisplay() {
+    if (!screenAsleep) {
+        lastActivityMs = millis();
+        return;
+    }
+    screenAsleep = false;
+    lcd_wakeup();
+    lcd_setBrightness(brightnessLevels[brightnessIndex]);
+    lastActivityMs = millis();
+    updateDisplay(true); // force redraw immediately
+    Serial.println("[display] AMOLED woke up (Display ON & Sleep OUT)");
+}
+
+bool isDisplaySleeping() {
+    return screenAsleep;
+}
+
+void setSleepTimeout(uint32_t seconds) {
+    sleepTimeoutSec = seconds;
+    lastActivityMs = millis();
+    dispPrefs.begin("disp", false);
+    dispPrefs.putUInt("timeout", sleepTimeoutSec);
+    dispPrefs.end();
+    Serial.printf("[display] Sleep timeout updated to %u sec\n", sleepTimeoutSec);
+}
+
+uint32_t getSleepTimeout() {
+    return sleepTimeoutSec;
+}
+
 void recordQueryActivity(bool blocked) {
     if (blocked) {
         if (histBlocked[histIdx] < 65535) histBlocked[histIdx]++;
@@ -108,41 +155,49 @@ void recordQueryActivity(bool blocked) {
 void displayToast(const char* message, uint32_t durationMs) {
     toastMsg = message;
     toastExpiry = millis() + durationMs;
+    resetActivityTimer();
+    if (screenAsleep) {
+        wakeupDisplay();
+    }
 }
 
 void setDisplayBrightness(uint8_t brightness) {
     lcd_setBrightness(brightness);
+    resetActivityTimer();
 }
 
 void nextPage() {
     currentPage = (currentPage + 1) % MAX_PAGES;
+    resetActivityTimer();
 }
 
 void setDisplayPage(uint8_t page) {
     if (page < MAX_PAGES) {
         currentPage = page;
         if (screenAsleep) {
-            screenAsleep = false;
-            lcd_wakeup();
-            lcd_setBrightness(brightnessLevels[brightnessIndex]);
+            wakeupDisplay();
+        } else {
+            resetActivityTimer();
         }
     }
 }
 
 static void onBtn1Click() {
+    resetActivityTimer();
     if (screenAsleep) {
-        screenAsleep = false;
-        lcd_wakeup();
-        lcd_setBrightness(brightnessLevels[brightnessIndex]);
+        wakeupDisplay();
         return;
     }
     nextPage();
 }
 
 static void onBtn1LongPress() {
-    if (screenAsleep) return;
+    resetActivityTimer();
+    if (screenAsleep) {
+        wakeupDisplay();
+        return;
+    }
     displayToast("UPDATING RULES...", 3000);
-    // Background fetch will be picked up or run
     if (updateUrl.length()) {
         fetchBlocklist(updateUrl);
         displayToast(updateStatus.c_str(), 3500);
@@ -152,10 +207,9 @@ static void onBtn1LongPress() {
 }
 
 static void onBtn2Click() {
+    resetActivityTimer();
     if (screenAsleep) {
-        screenAsleep = false;
-        lcd_wakeup();
-        lcd_setBrightness(brightnessLevels[brightnessIndex]);
+        wakeupDisplay();
         return;
     }
     // Toggle blocking state: Active <-> Paused 5 mins (300s)
@@ -171,6 +225,11 @@ static void onBtn2Click() {
 }
 
 static void onBtn2LongPress() {
+    resetActivityTimer();
+    if (screenAsleep) {
+        wakeupDisplay();
+        return;
+    }
     brightnessIndex = (brightnessIndex + 1) % 4;
     lcd_setBrightness(brightnessLevels[brightnessIndex]);
     char bStr[32];
@@ -213,7 +272,14 @@ void initDisplay() {
         Serial.println("[amoled] Non-Touch Edition (Hardware Buttons Active)");
     }
 
-    // 6. Draw Boot Splash Screen
+    // 7. Load Sleep Timeout configuration from NVS
+    dispPrefs.begin("disp", true);
+    sleepTimeoutSec = dispPrefs.getUInt("timeout", 300);
+    dispPrefs.end();
+    lastActivityMs = millis();
+    Serial.printf("[display] Sleep timeout configured: %u sec\n", sleepTimeoutSec);
+
+    // 8. Draw Boot Splash Screen
     spr.fillSprite(COLOR_BG);
     spr.setTextDatum(MC_DATUM);
 
@@ -250,6 +316,11 @@ static void checkTouch() {
 
         if (points > 0) {
             lastTouchMs = millis();
+            resetActivityTimer();
+            if (screenAsleep) {
+                wakeupDisplay();
+                return;
+            }
             uint16_t tx = (xHigh << 8) | xLow;
             uint16_t ty = (yHigh << 8) | yLow;
 
@@ -273,6 +344,13 @@ void updateDisplay(bool force) {
     checkTouch();
     updateIMU();
 
+    // Inactivity sleep check
+    if (sleepTimeoutSec > 0 && !screenAsleep && (millis() - lastActivityMs >= sleepTimeoutSec * 1000UL)) {
+        sleepDisplay();
+    }
+
+    if (screenAsleep) return;
+
     // Roll query history slot every 10 seconds
     if (millis() - lastHistRoll >= 10000UL) {
         lastHistRoll = millis();
@@ -284,8 +362,6 @@ void updateDisplay(bool force) {
     static uint32_t lastRender = 0;
     if (!force && millis() - lastRender < 350) return; // ~3 FPS smooth dashboard refresh
     lastRender = millis();
-
-    if (screenAsleep) return;
 
     spr.fillSprite(COLOR_BG);
 
