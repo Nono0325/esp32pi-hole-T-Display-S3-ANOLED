@@ -221,14 +221,17 @@ void lcd_setBrightness(uint8_t brightness)
 
 void lcd_sleep()
 {
-    lcd_send_cmd(0x28, NULL, 0); // Display OFF
+    lcd_send_cmd(0x28, NULL, 0); // Display OFF (Stops AMOLED emission & scan completely)
     delay(20);
-    lcd_send_cmd(0x10, NULL, 0); // Sleep IN
 }
 
 void lcd_wakeup()
 {
     lcd_send_cmd(0x11, NULL, 0); // Sleep OUT
-    delay(120);
-    lcd_send_cmd(0x29, NULL, 0); // Display ON
+    delay(20);
+    uint8_t fmt = 0x55;
+    lcd_send_cmd(0x3A, &fmt, 1);  // Interface Pixel Format 16bit/pixel (RGB565)
+    delay(10);
+    lcd_send_cmd(0x29, NULL, 0); // Display ON (Resumes AMOLED emission & scan)
+    delay(20);
 }

@@ -122,10 +122,11 @@ void wakeupDisplay() {
     }
     screenAsleep = false;
     lcd_wakeup();
+    lcd_setRotation(getCurrentRotation()); // Re-apply MADCTL orientation for RM67162
     lcd_setBrightness(brightnessLevels[brightnessIndex]);
     lastActivityMs = millis();
     updateDisplay(true); // force redraw immediately
-    Serial.println("[display] AMOLED woke up (Display ON & Sleep OUT)");
+    Serial.println("[display] AMOLED woke up (Display ON & Screen Restored)");
 }
 
 bool isDisplaySleeping() {
@@ -339,6 +340,22 @@ static void checkTouch() {
 }
 
 void updateDisplay(bool force) {
+    if (screenAsleep) {
+        // Direct zero-latency hardware button check for instant wakeup on BOOT or User key
+        if (digitalRead(PIN_BUTTON_1) == LOW || digitalRead(PIN_BUTTON_2) == LOW) {
+            delay(15); // Debounce
+            if (digitalRead(PIN_BUTTON_1) == LOW || digitalRead(PIN_BUTTON_2) == LOW) {
+                Serial.println("[display] Physical button pressed -> Instant Hardware Wakeup!");
+                wakeupDisplay();
+                while (digitalRead(PIN_BUTTON_1) == LOW || digitalRead(PIN_BUTTON_2) == LOW) {
+                    delay(10);
+                }
+                delay(20);
+                return;
+            }
+        }
+    }
+
     // Tick buttons and touch controller (hardware wakeup triggers)
     btn1.tick();
     btn2.tick();
