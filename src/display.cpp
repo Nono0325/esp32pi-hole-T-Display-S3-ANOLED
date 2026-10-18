@@ -35,6 +35,12 @@ extern uint32_t resumeAt;
 extern String updateStatus;
 extern String updateUrl;
 extern bool fetchBlocklist(String url);
+extern String upstreamName;
+extern int numLocalDns;
+
+// Internet connectivity sentinel status
+static bool netIsOnline = true;
+static int32_t netRttMs = 12;
 
 struct WeatherData {
     float temp;
@@ -102,6 +108,11 @@ static void drawHeader(const char* title, uint16_t titleColor);
 static void drawFooter();
 static void drawToast();
 static void checkTouch();
+
+void setInternetStatus(bool online, int32_t rttMs) {
+    netIsOnline = online;
+    netRttMs = rttMs;
+}
 
 void resetActivityTimer() {
     lastActivityMs = millis();
@@ -403,16 +414,25 @@ static void drawHeader(const char* title, uint16_t titleColor) {
     spr.setTextColor(titleColor, COLOR_BG);
     spr.drawString(title, 12, 6, 2);
 
-    // WiFi Info & IP
+    // WiFi Info & IP & Ping Latency / WAN Alert
     spr.setTextDatum(TR_DATUM);
-    String netInfo = "";
-    if (WiFi.status() == WL_CONNECTED) {
-        netInfo = WiFi.SSID() + " (" + String(WiFi.RSSI()) + "dBm)  " + WiFi.localIP().toString();
+    if (!netIsOnline) {
+        bool flash = ((millis() / 500) % 2) == 0;
+        spr.setTextColor(flash ? COLOR_RED : COLOR_AMBER, COLOR_BG);
+        spr.drawString("! WAN OFFLINE !", SCREEN_W - 12, 6, 2);
     } else {
-        netInfo = "WiFi: Disconnected";
+        String netInfo = "";
+        if (WiFi.status() == WL_CONNECTED) {
+            char pingStr[16];
+            if (netRttMs >= 0) snprintf(pingStr, sizeof(pingStr), "[%ldms] ", (long)netRttMs);
+            else strcpy(pingStr, "");
+            netInfo = String(pingStr) + WiFi.SSID() + " (" + String(WiFi.RSSI()) + "dBm)  " + WiFi.localIP().toString();
+        } else {
+            netInfo = "WiFi: Disconnected";
+        }
+        spr.setTextColor(COLOR_GRAY, COLOR_BG);
+        spr.drawString(netInfo, SCREEN_W - 12, 6, 2);
     }
-    spr.setTextColor(COLOR_GRAY, COLOR_BG);
-    spr.drawString(netInfo, SCREEN_W - 12, 6, 2);
 
     // Sleek header divider line
     spr.drawFastHLine(12, 26, SCREEN_W - 24, COLOR_CARD_BORDER);
@@ -474,8 +494,18 @@ static void drawPageOverview() {
     spr.drawString(rulesStr, 264, 50, 2);
 
     spr.setTextDatum(MR_DATUM);
-    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
-    spr.drawString("Upstream: Quad9 9.9.9.9", SCREEN_W - 24, 50, 2);
+    char upInfo[64];
+    if (netIsOnline && netRttMs >= 0) {
+        snprintf(upInfo, sizeof(upInfo), "Upstream: %s (%ldms)", upstreamName.c_str(), (long)netRttMs);
+        spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+    } else if (!netIsOnline) {
+        snprintf(upInfo, sizeof(upInfo), "Upstream: WAN OFFLINE");
+        spr.setTextColor(COLOR_RED, COLOR_CARD);
+    } else {
+        snprintf(upInfo, sizeof(upInfo), "Upstream: %s", upstreamName.c_str());
+        spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    }
+    spr.drawString(upInfo, SCREEN_W - 24, 50, 2);
 
     // ---- 3 Stat Cards (y: 74 to 198) ----
     int cardY = 74;
@@ -833,7 +863,15 @@ static void drawPageSystem() {
     spr.drawString("IP: " + WiFi.localIP().toString(), x1 + 10, y1 + 24, 2);
     spr.setTextColor(COLOR_GRAY, COLOR_CARD);
     spr.drawString("SSID: " + WiFi.SSID() + " (" + String(WiFi.RSSI()) + " dBm)", x1 + 10, y1 + 44, 1);
-    spr.drawString("DNS Port: 53  |  Dashboard: 80", x1 + 10, y1 + 58, 1);
+    char netStatusStr[48];
+    if (netIsOnline && netRttMs >= 0) {
+        snprintf(netStatusStr, sizeof(netStatusStr), "WAN: Online (%ldms)  |  Port 53", (long)netRttMs);
+        spr.setTextColor(COLOR_GREEN, COLOR_CARD);
+    } else {
+        snprintf(netStatusStr, sizeof(netStatusStr), "WAN: OFFLINE ALERT  |  Port 53");
+        spr.setTextColor(COLOR_RED, COLOR_CARD);
+    }
+    spr.drawString(netStatusStr, x1 + 10, y1 + 58, 1);
 
     // Card 2: Memory & PSRAM
     spr.fillRoundRect(x2, y1, cardW, cardH, 8, COLOR_CARD);
@@ -891,7 +929,7 @@ static void drawPageSystem() {
 
     spr.setTextColor(COLOR_GRAY, COLOR_CARD);
     char fsStr[48];
-    snprintf(fsStr, sizeof(fsStr), "Blocklist DB: %u domains", numHashes);
+    snprintf(fsStr, sizeof(fsStr), "Rules: %u  |  Local DNS: %d", numHashes, numLocalDns);
     spr.drawString(fsStr, x2 + 10, y2 + 44, 1);
     spr.drawString("IMU: " + String(getIMUName()) + " (Auto-Flip)", x2 + 10, y2 + 58, 1);
 

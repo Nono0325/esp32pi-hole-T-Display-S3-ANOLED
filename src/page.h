@@ -27,6 +27,7 @@ th{background:#21262d;color:#8b949e}tr:hover td{background:#1c2128}
 .tag{background:#30363d;border-radius:4px;padding:2px 6px;font-size:11px}
 .badge-blk{background:#3b1d1d;color:#f85149;border:1px solid #da3633;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600}
 .badge-alw{background:#1b3320;color:#3fb950;border:1px solid #2ea043;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600}
+.badge-local{background:#0d3846;color:#58a6ff;border:1px solid #1f6feb;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600}
 button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:5px;padding:6px 12px;cursor:pointer;font-size:13px}
 button:hover{background:#30363d;border-color:#8b949e}.ban{color:#f85149}
 input,select{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;border-radius:5px;padding:7px 9px}
@@ -54,6 +55,12 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
 
 <!-- ==================== 1. 儀表板總覽分頁 ==================== -->
 <div id="view-dash" class="tab-content active">
+  <div id=wanalert style="display:none;background:#3d1618;border:1px solid #da3633;color:#f85149;padding:10px 16px;border-radius:8px;margin-bottom:14px;font-weight:600;align-items:center;gap:10px">
+    <span style="font-size:20px;line-height:1">⚠️</span>
+    <span style="flex:1">網際網路連線中斷警報：無法與上游外網 DNS 伺服器通訊，外網可能已斷線！</span>
+    <span id=offline_timer style="font-size:12px;color:#c9d1d9"></span>
+  </div>
+
   <div id=blockbar>
     <span id=blockdot style="font-size:20px;line-height:1">🛡️</span><b id=blockstate style="flex:1" data-on=1>廣告攔截防護中</b>
     <select id=pausedur>
@@ -70,6 +77,7 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
     <div class=card><div class="v b" id=v_blocked>0</div><div class=l>已攔截廣告</div></div>
     <div class=card><div class="v a" id=v_allowed>0</div><div class=l>已允許查詢</div></div>
     <div class=card><div class=v id=v_rate>0.0%</div><div class=l>廣告攔截率</div></div>
+    <div class=card><div class=v id=v_ping style="color:#58a6ff">-- ms</div><div class=l>外網連線延遲</div></div>
     <div class=card><div class=v id=v_domains>0</div><div class=l>規則庫網域數</div></div>
     <div class=card><div class=v id=v_clients>0</div><div class=l>已連線設備</div></div>
     <div class=card><div class=v id=v_wifi>--</div><div class=l>WiFi 訊號</div></div>
@@ -295,6 +303,24 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
       💡 <b>降溫指南</b>：ESP32-S3 雙核心預設全速 240MHz 運行且持續維持高頻 Wi-Fi 射頻時發熱量最大。切換至 <b>160 MHz 或 80 MHz</b> 並開啟 <b>Wi-Fi Modem Sleep</b>，可大幅降低功耗並使設備降溫 10~15°C，DNS 解析與畫面渲染完全零卡頓。
     </div>
   </div>
+
+  <h2>🏠 8. 區網自訂網域解析 (Local DNS Records)</h2>
+  <div class=panel>
+    <div style="font-weight:600;margin-bottom:8px">自訂區網名稱與 IP 對應 (Local Domain Mapping)</div>
+    <div class=tool-row style="margin-bottom:12px;gap:8px;flex-wrap:wrap">
+      <input id=locdom placeholder="自訂網域 (例如 nas.lan 或 router.home)" style="flex:1;min-width:200px">
+      <input id=locip placeholder="目標 IPv4 (例如 192.168.50.100)" size=18>
+      <button onclick="addLocalDnsRecord()" style="background:#238636;color:#fff;border-color:#2ea043">+ 新增區網解析</button>
+    </div>
+    <div class=section-desc style="margin-bottom:12px">
+      設定自訂網域後，內部區網設備查詢該網域將直接在 0.2ms 內由本機快速解析為指定 IP，無須繞經外網 DNS。支援各類 NAS、智慧家電、Proxmox/ESXi 伺服器或印表機。
+    </div>
+    <table id=localtb>
+      <colgroup><col style="width:50%"><col style="width:35%"><col style="width:15%"></colgroup>
+      <thead><tr><th>自訂網域名稱</th><th>目標 IP 位址</th><th>操作</th></tr></thead>
+      <tbody><tr><td colspan=3 style="color:#8b949e">目前尚未建立自訂區網解析記錄</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 </div>
@@ -438,7 +464,7 @@ async function saveWeatherConfig(){
   }
 }
 
-let inFlight=false,lastCustom='',lastAllow='',lastTop='';
+let inFlight=false,lastCustom='',lastAllow='',lastTop='',lastLocalDns='';
 async function load(){
   if(inFlight)return;inFlight=true;
   try{
@@ -465,6 +491,22 @@ async function load(){
     v_heap.textContent=Math.round(s.heap/1024)+' KB';
     v_psram.textContent=Math.round((s.psram||0)/1024)+' KB';
     v_uptime.textContent=s.uptime;
+
+    // Ping Sentinel WAN Latency & Alert
+    if(s.netOnline !== undefined && window.v_ping){
+      if(!s.netOnline){
+        v_ping.innerHTML = '<span style="color:#f85149">⚠️ 斷網</span>';
+        if(window.wanalert) {
+          wanalert.style.display = 'flex';
+          if(s.offlineSec && window.offline_timer) offline_timer.textContent = `已斷線 ${s.offlineSec} 秒`;
+        }
+      } else {
+        let rtt = s.pingRtt || 0;
+        let color = rtt < 35 ? '#3fb950' : (rtt < 80 ? '#58a6ff' : '#d29922');
+        v_ping.innerHTML = `<span style="color:${color}">${rtt} ms</span>`;
+        if(window.wanalert) wanalert.style.display = 'none';
+      }
+    }
 
     // Weather Header & Settings
     if(s.weather && s.weather.valid){
@@ -533,7 +575,7 @@ async function load(){
     // Query Logs Table
     if(s.logs && s.logs.length){
       lt.tBodies[0].innerHTML = s.logs.map(l=>{
-        let st = l.b ? '<span class=badge-blk>已攔截</span>' : '<span class=badge-alw>已轉發</span>';
+        let st = l.b ? '<span class=badge-blk>已攔截</span>' : (l.loc ? '<span class=badge-local>區網解析</span>' : '<span class=badge-alw>已轉發</span>');
         let act = l.b ? `<button class="alwbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+白名單</button>`
                       : `<button class="blkbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+黑名單</button>`;
         return `<tr><td style="color:#8b949e">${l.t ? (l.t%86400<10?'0':'')+Math.floor((l.t%3600)/60)+'分 '+(l.t%60)+'秒' : '剛剛'}</td><td>${esc(l.ip)}</td><td title="${esc(l.d)}">${esc(l.d)}</td><td>${st}</td><td>${act}</td></tr>`;
@@ -563,6 +605,13 @@ async function load(){
     if(cStr !== lastCustom){
       lastCustom = cStr;
       cl.tBodies[0].innerHTML=(s.custom&&s.custom.length)?s.custom.map(d=>`<tr><td>${esc(d)}</td><td style="text-align:right"><button class=rmbtn data-d="${esc(d)}">移除</button></td></tr>`).join(''):'<tr><td style="color:#8b949e">目前尚未加入任何自訂黑名單</td></tr>';
+    }
+
+    // Local DNS Records Table
+    let locStr = JSON.stringify(s.localdns||[]);
+    if(locStr !== lastLocalDns && window.localtb){
+      lastLocalDns = locStr;
+      localtb.tBodies[0].innerHTML = (s.localdns && s.localdns.length) ? s.localdns.map(item => `<tr><td><b>${esc(item.d)}</b></td><td><code>${esc(item.ip)}</code></td><td style="text-align:right"><button class="rmlocalbtn" data-d="${esc(item.d)}" style="padding:2px 8px;font-size:11px">移除</button></td></tr>`).join('') : '<tr><td colspan=3 style="color:#8b949e">目前尚未建立自訂區網解析記錄</td></tr>';
     }
 
     if(document.activeElement!=uurl)uurl.value=s.upurl||'';
@@ -596,6 +645,16 @@ async function changePassword(){
 function addDom(){let d=dom.value.trim();if(d){fetch('/addblock?d='+encodeURIComponent(d),{headers:CSRF_HDRS}).then(()=>{dom.value='';load()})}}
 function addAllowDom(){let d=allowin.value.trim();if(d){fetch('/addallow?d='+encodeURIComponent(d),{headers:CSRF_HDRS}).then(()=>{allowin.value='';load()})}}
 
+async function addLocalDnsRecord(){
+  let d = locdom.value.trim(), ip = locip.value.trim();
+  if(!d || !ip){ alert('請輸入自訂網域名稱與目標 IPv4 位址'); return; }
+  try {
+    let r = await fetch('/addlocaldns?d=' + encodeURIComponent(d) + '&ip=' + encodeURIComponent(ip), {headers: CSRF_HDRS});
+    if(r.ok){ locdom.value = ''; locip.value = ''; load(); }
+    else { alert('新增失敗: ' + await r.text()); }
+  } catch(e){ alert('請求失敗，請檢查網路連線'); }
+}
+
 ct.addEventListener('click',e=>{if(e.target.classList.contains('ban'))fetch('/ban?ip='+e.target.dataset.ip,{headers:CSRF_HDRS}).then(load)});
 cl.addEventListener('click',e=>{if(e.target.classList.contains('rmbtn'))fetch('/unblock?d='+encodeURIComponent(e.target.dataset.d),{headers:CSRF_HDRS}).then(load)});
 at.addEventListener('click',e=>{if(e.target.classList.contains('rmalwbtn'))fetch('/unallow?d='+encodeURIComponent(e.target.dataset.d),{headers:CSRF_HDRS}).then(load)});
@@ -605,6 +664,11 @@ document.addEventListener('click',e=>{
     fetch('/addallow?d='+encodeURIComponent(e.target.dataset.d),{headers:CSRF_HDRS}).then(load);
   } else if(e.target.classList.contains('blkbtn')){
     fetch('/addblock?d='+encodeURIComponent(e.target.dataset.d),{headers:CSRF_HDRS}).then(load);
+  } else if(e.target.classList.contains('rmlocalbtn')){
+    let d = e.target.dataset.d;
+    if(confirm(`確定要移除區網解析記錄 [${d}] 嗎？`)){
+      fetch('/dellocaldns?d='+encodeURIComponent(d),{headers:CSRF_HDRS}).then(load);
+    }
   }
 });
 

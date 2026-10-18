@@ -74,6 +74,7 @@ struct QueryLog {
   char domain[64];
   uint32_t clientIp;
   bool blocked;
+  bool isLocal;
   uint32_t timeSec;
 };
 static const int MAX_LOGS = 50;
@@ -320,13 +321,105 @@ static void loadAllow() {
   }
 }
 
+// ---------- local DNS records ----------
+struct LocalDnsEntry {
+  String domain;
+  IPAddress ip;
+};
+static const int MAX_LOCAL_DNS = 64;
+LocalDnsEntry localDns[MAX_LOCAL_DNS];
+int numLocalDns = 0;
+
+static void saveLocalDns() {
+  File f = LittleFS.open("/localdns.txt", "w");
+  if (!f) return;
+  for (int i = 0; i < numLocalDns; i++) {
+    f.print(localDns[i].domain);
+    f.print(' ');
+    f.println(localDns[i].ip.toString());
+  }
+  f.close();
+}
+
+static void loadLocalDns() {
+  numLocalDns = 0;
+  File f = LittleFS.open("/localdns.txt", "r");
+  if (!f) return;
+  while (f.available() && numLocalDns < MAX_LOCAL_DNS) {
+    String l = f.readStringUntil('\n');
+    l.trim();
+    if (l.length() == 0 || l.startsWith("#")) continue;
+    int sp = l.indexOf(' ');
+    if (sp > 0) {
+      String d = l.substring(0, sp);
+      String ipStr = l.substring(sp + 1);
+      d.trim(); d.toLowerCase();
+      ipStr.trim();
+      IPAddress ip;
+      if (ip.fromString(ipStr)) {
+        localDns[numLocalDns].domain = d;
+        localDns[numLocalDns].ip = ip;
+        numLocalDns++;
+      }
+    }
+  }
+  f.close();
+  Serial.printf("[localdns] Loaded %d local DNS records\n", numLocalDns);
+}
+
+static bool addLocalDns(String d, IPAddress ip) {
+  d.trim(); d.toLowerCase();
+  if (d.startsWith("www.")) d = d.substring(4);
+  if (d.length() == 0 || (uint32_t)ip == 0) return false;
+  for (int i = 0; i < numLocalDns; i++) {
+    if (localDns[i].domain == d) {
+      localDns[i].ip = ip;
+      saveLocalDns();
+      return true;
+    }
+  }
+  if (numLocalDns >= MAX_LOCAL_DNS) return false;
+  localDns[numLocalDns].domain = d;
+  localDns[numLocalDns].ip = ip;
+  numLocalDns++;
+  saveLocalDns();
+  return true;
+}
+
+static bool removeLocalDns(String d) {
+  d.trim(); d.toLowerCase();
+  for (int i = 0; i < numLocalDns; i++) {
+    if (localDns[i].domain == d) {
+      for (int j = i; j < numLocalDns - 1; j++) {
+        localDns[j] = localDns[j + 1];
+      }
+      numLocalDns--;
+      saveLocalDns();
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool matchLocalDns(const char* domain, IPAddress& outIp) {
+  if (!domain || !*domain || numLocalDns == 0) return false;
+  for (int i = 0; i < numLocalDns; i++) {
+    if (strcasecmp(domain, localDns[i].domain.c_str()) == 0) {
+      outIp = localDns[i].ip;
+      return true;
+    }
+  }
+  return false;
+}
+
 // ---------- query logging & top blocked ----------
-static void recordQueryLog(const char* dom, uint32_t cip, bool blk) {
+static void recordQueryLog(const char* dom, uint32_t cip, bool blk, bool isLoc = false) {
   QueryLog& l = queryLogs[logHead];
   strncpy(l.domain, dom, sizeof(l.domain) - 1);
   l.domain[sizeof(l.domain) - 1] = 0;
   l.clientIp = cip;
   l.blocked = blk;
+  l.isLocal = isLoc;
   l.timeSec = millis() / 1000;
   logHead = (logHead + 1) % MAX_LOGS;
   if (logCount < MAX_LOGS) logCount++;
@@ -479,6 +572,99 @@ static int buildBlocked(int qend, uint16_t qtype) {
   const uint8_t ans[] = {0xC0,0x0C, 0,1, 0,1, 0,0,1,0x2C, 0,4, 0,0,0,0};
   memcpy(buf + qend, ans, sizeof(ans)); return qend + sizeof(ans);
 }
+
+static int buildLocalAnswer(int qend, uint16_t qtype, IPAddress ip) {
+  buf[2] = 0x81; buf[3] = 0x80;
+  buf[4] = 0; buf[5] = 1;
+  buf[6] = 0; buf[7] = (qtype == 1) ? 1 : 0;
+  buf[8] = 0; buf[9] = 0;
+  buf[10] = 0; buf[11] = 0;
+  if (qtype != 1) return qend;
+  const uint8_t ans[] = {
+    0xC0, 0x0C,
+    0x00, 0x01,
+    0x00, 0x01,
+    0x00, 0x00, 0x00, 0x3C,
+    0x00, 0x04,
+    (uint8_t)ip[0], (uint8_t)ip[1], (uint8_t)ip[2], (uint8_t)ip[3]
+  };
+  memcpy(buf + qend, ans, sizeof(ans));
+  return qend + sizeof(ans);
+}
+
+// Ping Sentinel: periodic external internet connectivity & latency probe
+static WiFiUDP pingCli;
+static bool internetOnline = true;
+static int32_t internetPingRtt = 12;
+static uint32_t lastInternetCheck = 0;
+static uint32_t internetOfflineSince = 0;
+static uint8_t internetConsecutiveFails = 0;
+
+static void checkInternetHealth() {
+  if (WiFi.status() != WL_CONNECTED) {
+    if (internetOnline) {
+      internetOnline = false;
+      internetOfflineSince = millis();
+      setInternetStatus(false, -1);
+    }
+    return;
+  }
+  uint32_t now = millis();
+  if (now - lastInternetCheck < 20000 && lastInternetCheck != 0) return;
+  lastInternetCheck = now;
+
+  const uint8_t probePkt[] = {
+    0xBE, 0xEF, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x06, 'g','o','o','g','l','e', 0x03, 'c','o','m', 0x00,
+    0x00, 0x01, 0x00, 0x01
+  };
+
+  pingCli.flush();
+  while (pingCli.parsePacket() > 0) pingCli.flush();
+  pingCli.beginPacket(upstreamIP, upstreamPort);
+  pingCli.write(probePkt, sizeof(probePkt));
+  pingCli.endPacket();
+
+  uint32_t t0 = millis();
+  bool gotReply = false;
+  int rtt = 0;
+  while (millis() - t0 < 800) {
+    int sz = pingCli.parsePacket();
+    if (sz > 0) {
+      uint8_t rBuf[64];
+      int n = pingCli.read(rBuf, sizeof(rBuf));
+      pingCli.flush();
+      if (n >= 12 && rBuf[0] == 0xBE && rBuf[1] == 0xEF) {
+        gotReply = true;
+        rtt = (int)(millis() - t0);
+        break;
+      }
+    }
+    delay(2);
+  }
+
+  if (gotReply) {
+    if (!internetOnline) {
+      internetOnline = true;
+      wakeupDisplay();
+      displayToast("WAN ONLINE RESTORED", 4000);
+    }
+    internetConsecutiveFails = 0;
+    internetPingRtt = (internetPingRtt > 0) ? ((internetPingRtt * 3 + rtt) / 4) : rtt;
+    setInternetStatus(true, internetPingRtt);
+  } else {
+    internetConsecutiveFails++;
+    if (internetConsecutiveFails >= 3) {
+      if (internetOnline) {
+        internetOnline = false;
+        internetOfflineSince = millis();
+        wakeupDisplay();
+        displayToast("! WAN OFFLINE ALERT !", 6000);
+      }
+      setInternetStatus(false, -1);
+    }
+  }
+}
 // Forward to upstream and wait for the reply that actually belongs to THIS query.
 // Issue #10: after one timeout the late reply used to sit in the socket and get relayed
 // to the next client (every answer shifted by one). Now: drain stale datagrams first,
@@ -522,22 +708,34 @@ static bool handleDns() {
     size_t dl = parseQuery(buf, qlen, domain, &qtype, &qend);
     Dev* c = getClient((uint32_t)cip);
     bool ban = c && c->banned;
-    bool allowedByWhitelist = isAllowedDomain(domain);
-    bool blocked = !allowedByWhitelist && (ban || (blockingOn && dl && (numHashes > 0 || numCustom > 0) && isBlocked(domain)));
-    int rlen;
-    if (blocked) {
-      rlen = buildBlocked(qend, qtype);
-      totalBlocked++;
-      if (c) c->blocked++;
-      recordQueryActivity(true);
-      recordBlockedDomain(domain);
-    } else {
-      rlen = forwardUpstream(qlen, qend);
+    IPAddress localTargetIp;
+    bool isLocal = matchLocalDns(domain, localTargetIp);
+    int rlen = 0;
+    bool blocked = false;
+
+    if (isLocal) {
+      rlen = buildLocalAnswer(qend, qtype, localTargetIp);
       totalAllowed++;
       if (c) c->allowed++;
       recordQueryActivity(false);
+      recordQueryLog(domain, (uint32_t)cip, false, true);
+    } else {
+      bool allowedByWhitelist = isAllowedDomain(domain);
+      blocked = !allowedByWhitelist && (ban || (blockingOn && dl && (numHashes > 0 || numCustom > 0) && isBlocked(domain)));
+      if (blocked) {
+        rlen = buildBlocked(qend, qtype);
+        totalBlocked++;
+        if (c) c->blocked++;
+        recordQueryActivity(true);
+        recordBlockedDomain(domain);
+      } else {
+        rlen = forwardUpstream(qlen, qend);
+        totalAllowed++;
+        if (c) c->allowed++;
+        recordQueryActivity(false);
+      }
+      if (dl) recordQueryLog(domain, (uint32_t)cip, blocked, false);
     }
-    if (dl) recordQueryLog(domain, (uint32_t)cip, blocked);
     if (rlen > 0) { dnsServer.beginPacket(cip, cport); dnsServer.write(buf, rlen); dnsServer.endPacket(); }
   }
   return did;
@@ -643,6 +841,15 @@ static void handleStats() {
   j += ",\"sleepTimeout\":" + String(getSleepTimeout());
   j += ",\"cpufreq\":" + String(getCpuFrequencyMhz());
   j += ",\"wifisleep\":" + String(wifiModemSleep ? "true" : "false");
+  j += ",\"localdns\":[";
+  for (int i = 0; i < numLocalDns; i++) {
+    j += (i ? "," : "");
+    j += "{\"d\":\"" + jesc(localDns[i].domain) + "\",\"ip\":\"" + localDns[i].ip.toString() + "\"}";
+  }
+  j += "]";
+  j += ",\"netOnline\":" + String(internetOnline ? "true" : "false");
+  j += ",\"pingRtt\":" + String(internetPingRtt);
+  j += ",\"offlineSec\":" + String(internetOnline ? 0 : (millis() - internetOfflineSince) / 1000);
   j += ",\"logs\":[";
   int outCount = (logCount > 35) ? 35 : logCount;
   for (int i = 0; i < outCount; i++) {
@@ -650,7 +857,7 @@ static void handleStats() {
     QueryLog& l = queryLogs[idx];
     IPAddress cip(l.clientIp);
     j += (i ? "," : "");
-    j += "{\"d\":\"" + jesc(l.domain) + "\",\"ip\":\"" + cip.toString() + "\",\"b\":" + (l.blocked ? "true" : "false") + ",\"t\":" + String(l.timeSec) + "}";
+    j += "{\"d\":\"" + jesc(l.domain) + "\",\"ip\":\"" + cip.toString() + "\",\"b\":" + (l.blocked ? "true" : "false") + ",\"loc\":" + (l.isLocal ? "true" : "false") + ",\"t\":" + String(l.timeSec) + "}";
   }
   j += "]}";
   web.send(200, "application/json", j);
@@ -807,6 +1014,39 @@ static void handleSetPower() {
   }
   displayToast("POWER CFG UPDATED", 2500);
   web.send(200, "text/plain", "ok");
+}
+
+static void handleAddLocalDns() {
+  if (!requireAuth()) return;
+  if (!web.hasArg("d") || !web.hasArg("ip")) {
+    web.send(400, "text/plain", "Missing domain or IP");
+    return;
+  }
+  String d = web.arg("d");
+  String ipStr = web.arg("ip");
+  IPAddress ip;
+  if (!ip.fromString(ipStr)) {
+    web.send(400, "text/plain", "Invalid IPv4 address format");
+    return;
+  }
+  if (addLocalDns(d, ip)) {
+    web.send(200, "text/plain", "ok");
+  } else {
+    web.send(400, "text/plain", "Failed to add (invalid domain or limit reached)");
+  }
+}
+
+static void handleDelLocalDns() {
+  if (!requireAuth()) return;
+  if (!web.hasArg("d")) {
+    web.send(400, "text/plain", "Missing domain");
+    return;
+  }
+  if (removeLocalDns(web.arg("d"))) {
+    web.send(200, "text/plain", "ok");
+  } else {
+    web.send(404, "text/plain", "Domain not found");
+  }
 }
 
 // ---------- blocklist swap (shared by upload + remote fetch) ----------
@@ -1033,9 +1273,9 @@ void setup() {
     Serial.printf("blocklist: %u domains\n", numHashes);
     buildFlashIndex();
   }
-  loadCustom(); loadAllow(); loadBanned(); loadUpdateCfg(); loadUpstream(); loadWeatherCfg();
-  Serial.printf("custom: %d, allow: %d, banned: %d, upstream: %s:%d, city: %s\n",
-                numCustom, numAllow, numBanned, upstreamIP.toString().c_str(), upstreamPort, weatherCity.c_str());
+  loadCustom(); loadAllow(); loadBanned(); loadUpdateCfg(); loadUpstream(); loadWeatherCfg(); loadLocalDns();
+  Serial.printf("custom: %d, allow: %d, banned: %d, localdns: %d, upstream: %s:%d, city: %s\n",
+                numCustom, numAllow, numBanned, numLocalDns, upstreamIP.toString().c_str(), upstreamPort, weatherCity.c_str());
 
   // Hold BOOT at power-on to wipe saved WiFi and reset password
 #if CONFIG_IDF_TARGET_ESP32C3
@@ -1064,7 +1304,7 @@ void setup() {
   if (currentWebPass == "CHANGE_ME_WEB_PASSWORD")
     Serial.println("[WARN] placeholder WEB_PASS in use.");
 
-  dnsServer.begin(DNS_PORT); upstreamCli.begin(0);
+  dnsServer.begin(DNS_PORT); upstreamCli.begin(0); pingCli.begin(0);
   { const char* hdrs[] = { CSRF_HEADER }; web.collectHeaders(hdrs, 1); }  // needed for requireAuth()'s CSRF check
   web.on("/", []() { web.send_P(200, "text/html", PAGE); });
   web.on("/stats.json", handleStats);
@@ -1073,6 +1313,8 @@ void setup() {
   web.on("/unblock", []() { if (!requireAuth()) return; removeCustom(web.arg("d")); web.send(200, "text/plain", "ok"); });
   web.on("/addallow", []() { if (!requireAuth()) return; addAllow(web.arg("d")); web.send(200, "text/plain", "ok"); });
   web.on("/unallow", []() { if (!requireAuth()) return; removeAllow(web.arg("d")); web.send(200, "text/plain", "ok"); });
+  web.on("/addlocaldns", handleAddLocalDns);
+  web.on("/dellocaldns", handleDelLocalDns);
   web.on("/setupstream", handleSetUpstream);
   web.on("/dnstest", handleDnsTest);
   web.on("/flushcache", handleFlushCache);
@@ -1148,6 +1390,7 @@ void loop() {
       updateWeather();
     }
   }
+  checkInternetHealth();
   updateDisplay();
   if (!busy) {
     // When display is sleeping, sleep 10ms for deep cooling; when awake, sleep 2ms for FreeRTOS idle yield
