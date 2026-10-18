@@ -680,10 +680,10 @@ static void handleDnsTest() {
   bool wouldBlock = !inAllow && (inCust || inFlsh);
 
   String reason = "none";
-  if (inAllow) reason = "Allowed by Whitelist Rule";
-  else if (inCust) reason = "Blocked by Custom Block Rule";
-  else if (inFlsh) reason = "Blocked by Global Flash Blocklist";
-  else reason = "Passed (Forwarded to Upstream DNS)";
+  if (inAllow) reason = "命中白名單信任規則 (允許通過)";
+  else if (inCust) reason = "命中自訂黑名單 (已封鎖攔截)";
+  else if (inFlsh) reason = "命中全球廣告資料庫 (已封鎖攔截)";
+  else reason = "正常網域 (已轉發至上游伺服器解析)";
 
   String resp = "{\"domain\":\"" + jesc(d) + "\",\"blocked\":" + (wouldBlock ? "true" : "false") +
                 ",\"reason\":\"" + jesc(reason) + "\",\"upstream\":\"" + upstreamIP.toString() + ":" + String(upstreamPort) + "\"}";

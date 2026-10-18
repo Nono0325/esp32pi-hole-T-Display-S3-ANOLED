@@ -2,11 +2,12 @@
 // Dashboard HTML for the T-Display-S3 AMOLED AdBlocker web UI.
 // Built for rock-solid stability with zero layout shift, in-place DOM updates,
 // tabular numbers, fixed column layouts, and smooth real-time refreshes.
+// Complete Traditional Chinese (繁體中文) localization.
 
 const char PAGE[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>T-Display-S3 AMOLED AdBlock</title><style>
+<title>T-Display-S3 AMOLED 廣告攔截管理系統</title><style>
 *{box-sizing:border-box}
-html,body{font:14px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;background:#0d1117;color:#c9d1d9;overflow-y:scroll}
+html,body{font:14px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Microsoft JhengHei",Roboto,sans-serif;margin:0;background:#0d1117;color:#c9d1d9;overflow-y:scroll}
 header{background:#161b22;padding:14px 18px;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
 h1{margin:0;font-size:18px}h1 span{color:#3fb950}.wrap{padding:16px;max-width:1050px;margin:auto}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:12px;margin-bottom:16px}
@@ -31,146 +32,151 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
 .tool-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
 </style></head><body>
 <header>
-  <h1>🛡️ T-Display-S3 AMOLED AdBlock <span id=host></span></h1>
-  <div id=wthr style="font-size:13px;color:#8b949e">🌤️ Weather: Loading...</div>
+  <h1>🛡️ T-Display-S3 AMOLED 廣告攔截器 <span id=host></span></h1>
+  <div id=wthr style="font-size:13px;color:#8b949e">🌤️ 台北天氣: 讀取中...</div>
 </header>
 <div class=wrap>
 <div id=credwarn style="display:none;background:#3b1d1d;border:1px solid #f85149;color:#ffb3ae;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px">
-⚠️ <b>Default credentials in use.</b> Change your password in the ADMIN section below.
+⚠️ <b>目前仍在使用預設管理員密碼。</b>請至下方「管理員安全設定」區塊變更您的專屬密碼。
 </div>
 
 <div id=blockbar>
-  <span id=blockdot style="font-size:20px;line-height:1">🛡️</span><b id=blockstate style="flex:1" data-on=1>Blocking active</b>
-  <select id=pausedur><option value=30>30s</option><option value=300 selected>5 min</option><option value=1800>30 min</option><option value=0>until I re-enable</option></select>
-  <button id=pausebtn onclick=togglePause()>Pause</button>
-  <button id=flipbtn onclick=flipScreen() title="Flip Screen 180°">🔄 Flip 180°</button>
+  <span id=blockdot style="font-size:20px;line-height:1">🛡️</span><b id=blockstate style="flex:1" data-on=1>廣告攔截防護中</b>
+  <select id=pausedur>
+    <option value=30>暫停 30 秒</option>
+    <option value=300 selected>暫停 5 分鐘</option>
+    <option value=1800>暫停 30 分鐘</option>
+    <option value=0>直到手動恢復</option>
+  </select>
+  <button id=pausebtn onclick=togglePause()>暫停攔截</button>
+  <button id=flipbtn onclick=flipScreen() title="旋轉螢幕畫面 180°">🔄 旋轉螢幕 180°</button>
 </div>
 
 <div class=cards id=sys>
-  <div class=card><div class="v b" id=v_blocked>0</div><div class=l>Blocked Ads</div></div>
-  <div class=card><div class="v a" id=v_allowed>0</div><div class=l>Allowed Queries</div></div>
-  <div class=card><div class=v id=v_rate>0.0%</div><div class=l>Block Rate</div></div>
-  <div class=card><div class=v id=v_domains>0</div><div class=l>Blocklist Rules</div></div>
-  <div class=card><div class=v id=v_clients>0</div><div class=l>Clients</div></div>
-  <div class=card><div class=v id=v_wifi>--</div><div class=l>WiFi Signal</div></div>
-  <div class=card><div class=v id=v_temp>--</div><div class=l>SoC Temp</div></div>
-  <div class=card><div class=v id=v_heap>--</div><div class=l>Free RAM</div></div>
-  <div class=card><div class=v id=v_psram>--</div><div class=l>Free PSRAM</div></div>
-  <div class=card><div class=v id=v_uptime>--</div><div class=l>Uptime</div></div>
+  <div class=card><div class="v b" id=v_blocked>0</div><div class=l>已攔截廣告</div></div>
+  <div class=card><div class="v a" id=v_allowed>0</div><div class=l>已允許查詢</div></div>
+  <div class=card><div class=v id=v_rate>0.0%</div><div class=l>廣告攔截率</div></div>
+  <div class=card><div class=v id=v_domains>0</div><div class=l>規則庫網域數</div></div>
+  <div class=card><div class=v id=v_clients>0</div><div class=l>已連線設備</div></div>
+  <div class=card><div class=v id=v_wifi>--</div><div class=l>WiFi 訊號</div></div>
+  <div class=card><div class=v id=v_temp>--</div><div class=l>晶片溫度</div></div>
+  <div class=card><div class=v id=v_heap>--</div><div class=l>可用 RAM</div></div>
+  <div class=card><div class=v id=v_psram>--</div><div class=l>可用 PSRAM</div></div>
+  <div class=card><div class=v id=v_uptime>--</div><div class=l>運行時間</div></div>
 </div>
 
-<h2>🛠️ NETWORK TOOLS & REMOTE CONTROLS (小工具專區)</h2>
+<h2>🛠️ 網路小工具與遠端遙控</h2>
 <div class=panel>
-  <div style="font-weight:600;margin-bottom:6px">1. DNS Resolution Diagnostic Tool (網域攔截測試)</div>
+  <div style="font-weight:600;margin-bottom:6px">1. 網域解析與攔截診斷工具</div>
   <div class=tool-row>
-    <input id=testdom placeholder="e.g. adservice.google.com" style="flex:1;min-width:220px">
-    <button onclick="runDnsTest()" style="background:#1f6feb;color:#fff;border-color:#388bfd">Test Domain</button>
-    <button onclick="flushDnsCache()" title="Clear internal memory cache">🧹 Flush DNS Cache</button>
+    <input id=testdom placeholder="輸入欲測試的網域，例如 adservice.google.com 或 google.com" style="flex:1;min-width:240px">
+    <button onclick="runDnsTest()" style="background:#1f6feb;color:#fff;border-color:#388bfd">診斷測試</button>
+    <button onclick="flushDnsCache()" title="清除 ESP32 內部記憶體 DNS 快取">🧹 清空 DNS 快取</button>
   </div>
   <div id=testres style="font-size:13px;min-height:18px;margin-bottom:14px;color:#8b949e"></div>
 
-  <div style="font-weight:600;margin-bottom:6px">2. Remote AMOLED Screen Switcher (螢幕畫面切換)</div>
+  <div style="font-weight:600;margin-bottom:6px">2. AMOLED 螢幕畫面遠端切換</div>
   <div class="tool-row btn-grp" style="margin-bottom:12px">
-    <button onclick="setScreenPage(0)">Page 0: Overview</button>
-    <button onclick="setScreenPage(1)">Page 1: Histogram</button>
-    <button onclick="setScreenPage(2)">Page 2: Clock & Weather</button>
-    <button onclick="setScreenPage(3)">Page 3: Top Blocked</button>
-    <button onclick="setScreenPage(4)">Page 4: Hardware Health</button>
-    <button onclick="setScreenPage(5)">Page 5: QR Connect</button>
+    <button onclick="setScreenPage(0)">第 0 頁: 防護總覽</button>
+    <button onclick="setScreenPage(1)">第 1 頁: 流量圖表</button>
+    <button onclick="setScreenPage(2)">第 2 頁: 時鐘與天氣</button>
+    <button onclick="setScreenPage(3)">第 3 頁: 攔截排行</button>
+    <button onclick="setScreenPage(4)">第 4 頁: 硬體健康</button>
+    <button onclick="setScreenPage(5)">第 5 頁: 掃碼連線</button>
   </div>
 
-  <div style="font-weight:600;margin-bottom:6px">3. AMOLED Brightness (亮度控制)</div>
+  <div style="font-weight:600;margin-bottom:6px">3. AMOLED 螢幕亮度調整</div>
   <div class="tool-row btn-grp">
-    <button onclick="setBrightness(255)">☀️ 100%</button>
-    <button onclick="setBrightness(170)">⛅ 66%</button>
-    <button onclick="setBrightness(75)">🌙 30%</button>
-    <button onclick="setBrightness(15)">🌑 5% (Low)</button>
+    <button onclick="setBrightness(255)">☀️ 100% 全亮</button>
+    <button onclick="setBrightness(170)">⛅ 66% 常用</button>
+    <button onclick="setBrightness(75)">🌙 30% 微光</button>
+    <button onclick="setBrightness(15)">🌑 5% 夜間</button>
   </div>
 </div>
 
-<h2>🌐 UPSTREAM DNS SERVER (動態上游伺服器)</h2>
+<h2>🌐 上游 DNS 伺服器切換</h2>
 <div class=panel>
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-    <div><b>Active DNS:</b> <span id=activeup class=tag style="color:#58a6ff">Loading...</span></div>
+    <div><b>目前生效中:</b> <span id=activeup class=tag style="color:#58a6ff">讀取中...</span></div>
     <div>
-      Preset:
+      熱門預設:
       <select id=uppreset onchange="applyUpstreamPreset()">
-        <option value="quad9">Quad9 (9.9.9.9) - Malware Block</option>
-        <option value="cloudflare">Cloudflare (1.1.1.1) - Privacy / Fast</option>
-        <option value="google">Google DNS (8.8.8.8) - High Reliability</option>
-        <option value="adguard">AdGuard DNS (94.140.14.14) - Upstream Ad Filter</option>
-        <option value="custom">Custom IP / Port</option>
+        <option value="quad9">Quad9 (9.9.9.9) - 惡意網站攔截保護</option>
+        <option value="cloudflare">Cloudflare (1.1.1.1) - 極速隱私保護</option>
+        <option value="google">Google DNS (8.8.8.8) - 穩定高可用</option>
+        <option value="adguard">AdGuard DNS (94.140.14.14) - 上游過濾</option>
+        <option value="custom">自訂 IP 與連接埠</option>
       </select>
     </div>
   </div>
   <div class=tool-row>
-    <input id=upip placeholder="IP (e.g. 9.9.9.9)" size=18>
-    <input id=upport placeholder="Port (53)" size=6 value="53">
-    <input id=upname placeholder="Name (e.g. Quad9)" size=14>
-    <button onclick="saveUpstreamDns()" style="background:#238636;color:#fff;border-color:#2ea043">Save Upstream</button>
+    <input id=upip placeholder="IP 位址 (例如 9.9.9.9)" size=18>
+    <input id=upport placeholder="埠號 (預設 53)" size=8 value="53">
+    <input id=upname placeholder="自訂名稱 (例如 Quad9)" size=14>
+    <button onclick="saveUpstreamDns()" style="background:#238636;color:#fff;border-color:#2ea043">儲存上游 DNS</button>
   </div>
-  <div id=upmsg style="font-size:12px;color:#8b949e">Upstream queries are forwarded dynamically without restarting the ESP32.</div>
+  <div id=upmsg style="font-size:12px;color:#8b949e">修改後即時動態生效，ESP32 無需重新開機。</div>
 </div>
 
-<h2>📊 REAL-TIME DNS QUERY LOG (即時查詢日誌)</h2>
+<h2>📊 即時 DNS 查詢日誌 (Live Query Log)</h2>
 <table id=lt>
   <colgroup><col style="width:12%"><col style="width:20%"><col style="width:46%"><col style="width:12%"><col style="width:10%"></colgroup>
-  <thead><tr><th>Time</th><th>Client</th><th>Domain</th><th>Status</th><th>Action</th></tr></thead>
-  <tbody><tr><td colspan=5 style="color:#8b949e">Waiting for queries...</td></tr></tbody>
+  <thead><tr><th>時間</th><th>設備 IP</th><th>查詢網域</th><th>處理狀態</th><th>快捷動作</th></tr></thead>
+  <tbody><tr><td colspan=5 style="color:#8b949e">等待網路查詢中...</td></tr></tbody>
 </table>
 
-<h2>🏆 TOP BLOCKED DOMAINS (熱門攔截排行)</h2>
+<h2>🏆 熱門攔截排行榜 (Top Blocked)</h2>
 <table id=tbt>
   <colgroup><col style="width:12%"><col style="width:60%"><col style="width:16%"><col style="width:12%"></colgroup>
-  <thead><tr><th>Rank</th><th>Domain</th><th>Hits</th><th>Action</th></tr></thead>
-  <tbody><tr><td colspan=4 style="color:#8b949e">No blocked queries recorded yet</td></tr></tbody>
+  <thead><tr><th>排名</th><th>網域名稱</th><th>攔截次數</th><th>操作</th></tr></thead>
+  <tbody><tr><td colspan=4 style="color:#8b949e">目前尚無攔截記錄</td></tr></tbody>
 </table>
 
-<h2>⚪ ALLOWLIST / WHITELIST (網域白名單)</h2>
+<h2>⚪ 網域白名單 (Allowlist - 信任允許)</h2>
 <div style="margin-bottom:8px">
-  <input id=allowin placeholder="domain.com (bypasses all blocking)" size=32>
-  <button onclick="addAllowDom()" style="background:#238636;color:#fff;border-color:#2ea043">Whitelist Domain</button>
+  <input id=allowin placeholder="輸入信任網域，例如 tw.manhuagui.com" size=34>
+  <button onclick="addAllowDom()" style="background:#238636;color:#fff;border-color:#2ea043">加入白名單</button>
 </div>
 <table id=at><colgroup><col style="width:80%"><col style="width:20%"></colgroup><tbody></tbody></table>
 
-<h2>🚫 CUSTOM BLOCKED DOMAINS (自訂黑名單)</h2>
-<div style="margin-bottom:8px"><input id=dom placeholder="ads.example.com" size=32><button onclick=addDom()>Block domain</button></div>
+<h2>🚫 自訂黑名單 (Custom Blocklist - 強制封鎖)</h2>
+<div style="margin-bottom:8px"><input id=dom placeholder="輸入廣告網域，例如 ads.example.com" size=34><button onclick=addDom()>加入黑名單</button></div>
 <table id=cl><colgroup><col style="width:80%"><col style="width:20%"></colgroup><tbody></tbody></table>
 
-<h2>💻 CONNECTED CLIENTS (連線設備)</h2>
+<h2>💻 連線設備列表 (Connected Clients)</h2>
 <table id=ct>
   <colgroup><col style="width:26%"><col style="width:26%"><col style="width:18%"><col style="width:18%"><col style="width:12%"></colgroup>
-  <thead><tr><th>Client</th><th>MAC</th><th>Blocked</th><th>Allowed</th><th>Action</th></tr></thead>
+  <thead><tr><th>設備 IP</th><th>MAC 位址</th><th>已攔截廣告</th><th>已允許查詢</th><th>管理</th></tr></thead>
   <tbody></tbody>
 </table>
 
-<h2>📦 BLOCKLIST &mdash; UPLOAD BINARY</h2>
-<form id=upf style="margin-bottom:6px"><input type=file id=blf accept=.bin><button>Upload blocklist</button> <span id=upmsg style="color:#8b949e"></span></form>
-<div style="color:#8b949e;font-size:12px;margin-bottom:18px">build <code>blocklist.bin</code> with <code>tools/build_blocklist.py</code>, then upload here &mdash; no USB</div>
+<h2>📦 規則資料庫上傳 (Blocklist Binary)</h2>
+<form id=upf style="margin-bottom:6px"><input type=file id=blf accept=.bin><button>上傳規則資料庫</button> <span id=upmsg style="color:#8b949e"></span></form>
+<div style="color:#8b949e;font-size:12px;margin-bottom:18px">使用 <code>tools/build_blocklist.py</code> 建立 <code>blocklist.bin</code> 後由此直接上傳，無需連接 USB</div>
 
-<h2>🔄 BLOCKLIST &mdash; REMOTE AUTO-UPDATE</h2>
-<div style="margin-bottom:6px"><input id=uurl placeholder="https://host/blocklist.bin" size=40> every <input id=uiv size=2 value=24>h
-<button onclick=saveUpd()>Save</button> <button onclick=fetchNow()>Fetch now</button></div>
-<div style="color:#8b949e;font-size:12px;margin-bottom:18px">device pulls a prebuilt <code>blocklist.bin</code> on a schedule (e.g. a GitHub release asset). last: <span id=ustat>&mdash;</span></div>
+<h2>🔄 遠端規則定期自動更新 (Remote Auto-Update)</h2>
+<div style="margin-bottom:6px"><input id=uurl placeholder="https://host/blocklist.bin" size=40> 每 <input id=uiv size=3 value=24> 小時
+<button onclick=saveUpd()>儲存排程</button> <button onclick=fetchNow()>立即下載更新</button></div>
+<div style="color:#8b949e;font-size:12px;margin-bottom:18px">設備將自動定時從指定的 URL 下載更新規則檔。上次更新狀態：<span id=ustat>&mdash;</span></div>
 
-<h2>⚡ FIRMWARE &mdash; OTA UPDATE</h2>
-<form id=fwf style="margin-bottom:6px"><input type=file id=fwb accept=.bin><button>Flash firmware</button> <span id=fwmsg style="color:#8b949e"></span></form>
-<div style="color:#8b949e;font-size:12px;margin-bottom:18px">upload <code>.pio/build/t-display-s3-amoled/firmware.bin</code> &mdash; device verifies it and reboots</div>
+<h2>⚡ 韌體無線升級 (Firmware OTA)</h2>
+<form id=fwf style="margin-bottom:6px"><input type=file id=fwb accept=.bin><button>上傳並刷寫韌體</button> <span id=fwmsg style="color:#8b949e"></span></form>
+<div style="color:#8b949e;font-size:12px;margin-bottom:18px">上傳編譯後的 <code>.pio/build/t-display-s3-amoled/firmware.bin</code>，設備校驗完成後將自動重新開機</div>
 
-<h2>🔑 ADMIN &amp; PASSWORD</h2>
+<h2>🔑 管理員安全設定 (Admin Credentials)</h2>
 <div class=panel>
   <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px">
-    <input id=newuser placeholder="Username (default: admin)" size=18>
-    <input type=password id=curpass placeholder="Current password" size=18>
-    <input type=password id=newpass placeholder="New password (min 4)" size=18>
-    <button onclick="changePassword()" style="background:#238636;color:#fff;border-color:#2ea043">Save Password</button>
+    <input id=newuser placeholder="使用者名稱 (預設: admin)" size=18>
+    <input type=password id=curpass placeholder="目前密碼" size=18>
+    <input type=password id=newpass placeholder="新密碼 (至少 4 字元)" size=18>
+    <button onclick="changePassword()" style="background:#238636;color:#fff;border-color:#2ea043">儲存新密碼</button>
   </div>
   <div id=pwdmsg style="font-size:13px;min-height:18px;color:#8b949e"></div>
-  <div style="color:#8b949e;font-size:12px;margin-top:4px">Credentials are stored in ESP32 flash memory for dashboard control and OTA firmware updates.</div>
+  <div style="color:#8b949e;font-size:12px;margin-top:4px">帳號密碼保存於 ESP32 Flash 內部記憶體，用於控制台操作與無線 OTA 韌體更新。</div>
 </div>
 
-<h2>📡 NETWORK RESET</h2>
-<div style="margin-bottom:24px"><button onclick="if(confirm('Forget saved WiFi and reboot into the setup portal?'))forgetWifi()">Forget WiFi</button></div>
+<h2>📡 網路設定重設</h2>
+<div style="margin-bottom:24px"><button onclick="if(confirm('確定要清除已儲存的 WiFi 設定並重新啟動進入配網模式嗎？'))forgetWifi()">清除 WiFi 連線設定並重啟</button></div>
 </div>
 
 <script>
@@ -182,22 +188,22 @@ function togglePause(){fetch(blockstate.dataset.on=='1'?'/pause?s='+pausedur.val
 function flipScreen(){fetch('/flip',{headers:CSRF_HDRS});}
 function setScreenPage(p){fetch('/setpage?p='+p,{headers:CSRF_HDRS});}
 function setBrightness(b){fetch('/setbrightness?b='+b,{headers:CSRF_HDRS});}
-function flushDnsCache(){fetch('/flushcache',{headers:CSRF_HDRS}).then(()=>{testres.innerHTML='<span style="color:#3fb950">✓ DNS Cache flushed successfully</span>';setTimeout(load,300);});}
+function flushDnsCache(){fetch('/flushcache',{headers:CSRF_HDRS}).then(()=>{testres.innerHTML='<span style="color:#3fb950">✓ DNS 快取已成功清空！</span>';setTimeout(load,300);});}
 
 async function runDnsTest(){
   let d = testdom.value.trim();
-  if(!d){testres.textContent='Please enter a domain name';return;}
-  testres.style.color='#8b949e';testres.textContent='Testing domain resolution...';
+  if(!d){testres.textContent='請輸入網域名稱';return;}
+  testres.style.color='#8b949e';testres.textContent='正在測試網域解析與比對...';
   try {
     let r = await fetch('/dnstest?d='+encodeURIComponent(d));
     let j = await r.json();
     if(j.blocked){
-      testres.innerHTML = `<span style="color:#f85149;font-weight:600">⛔ BLOCKED</span> (${esc(j.reason)}) &mdash; Query returned 0.0.0.0`;
+      testres.innerHTML = `<span style="color:#f85149;font-weight:600">⛔ 已封鎖攔截</span> (${esc(j.reason)}) &mdash; DNS 查詢回應 0.0.0.0`;
     } else {
-      testres.innerHTML = `<span style="color:#3fb950;font-weight:600">✅ PASSED</span> (${esc(j.reason)}) &mdash; Forwarded to Upstream DNS (${esc(j.upstream)})`;
+      testres.innerHTML = `<span style="color:#3fb950;font-weight:600">✅ 允許通過</span> (${esc(j.reason)}) &mdash; 已轉發至上游伺服器 (${esc(j.upstream)})`;
     }
   } catch(e){
-    testres.innerHTML = '<span style="color:#f85149">Test request failed</span>';
+    testres.innerHTML = '<span style="color:#f85149">測試請求失敗，請檢查網路連線</span>';
   }
 }
 
@@ -217,18 +223,18 @@ function applyUpstreamPreset(){
 }
 async function saveUpstreamDns(){
   let ip = upip.value.trim(), port = upport.value.trim()||53, name = upname.value.trim()||'Custom';
-  if(!ip){alert('Please enter an IP address');return;}
-  upmsg.textContent = 'Updating upstream DNS...';
+  if(!ip){alert('請輸入有效的 IP 位址');return;}
+  upmsg.textContent = '正在更新上游 DNS...';
   try {
     let r = await fetch('/setupstream?ip='+encodeURIComponent(ip)+'&port='+encodeURIComponent(port)+'&name='+encodeURIComponent(name),{headers:CSRF_HDRS});
     if(r.ok){
-      upmsg.style.color='#3fb950';upmsg.textContent='✓ Upstream DNS updated successfully!';
+      upmsg.style.color='#3fb950';upmsg.textContent='✓ 上游 DNS 更新成功！已立即生效。';
       setTimeout(load, 400);
     } else {
-      upmsg.style.color='#f85149';upmsg.textContent='✗ Failed: '+await r.text();
+      upmsg.style.color='#f85149';upmsg.textContent='✗ 更新失敗: '+await r.text();
     }
   } catch(e){
-    upmsg.style.color='#f85149';upmsg.textContent='✗ Network error';
+    upmsg.style.color='#f85149';upmsg.textContent='✗ 網路錯誤';
   }
 }
 
@@ -243,17 +249,17 @@ async function load(){
     let on=s.blocking!==false;blockstate.dataset.on=on?'1':'0';
     let dot=on?'🛡️':'⏸️';if(blockdot.textContent!==dot)blockdot.textContent=dot;
     blockbar.style.borderColor=on?'#30363d':'#f0883e';
-    let stMsg=on?'Blocking active':(s.resumeIn>0?'Paused — resumes in '+s.resumeIn+'s':'Paused');
+    let stMsg=on?'廣告攔截防護中':(s.resumeIn>0?'攔截已暫停 — 將於 '+s.resumeIn+' 秒後恢復':'攔截已暫停');
     if(blockstate.textContent!==stMsg)blockstate.textContent=stMsg;
-    pausebtn.textContent=on?'Pause':'Resume';pausedur.style.display=on?'':'none';
+    pausebtn.textContent=on?'暫停攔截':'恢復攔截';pausedur.style.display=on?'':'none';
 
     // Metrics cards
     v_blocked.textContent=fmt(s.blocked);
     v_allowed.textContent=fmt(s.allowed);
     let tot = (s.blocked||0) + (s.allowed||0);
     v_rate.textContent = tot>0 ? ((s.blocked*100/tot).toFixed(1)+'%') : '0.0%';
-    v_domains.textContent=fmt(s.domains);
-    v_clients.textContent=s.clients.length;
+    v_domains.textContent=fmt(s.domains)+' 條';
+    v_clients.textContent=s.clients.length+' 台';
     v_wifi.textContent=s.rssi+' dBm';
     v_temp.textContent=s.temp+' °C';
     v_heap.textContent=Math.round(s.heap/1024)+' KB';
@@ -262,7 +268,7 @@ async function load(){
 
     // Weather Header
     if(s.weather && s.weather.valid){
-      wthr.innerHTML = `🌤️ Taipei: <b>${s.weather.temp.toFixed(1)}°C</b> (${esc(s.weather.cond)}) &bull; Hum: ${s.weather.hum}%`;
+      wthr.innerHTML = `🌤️ 台北: <b>${s.weather.temp.toFixed(1)}°C</b> (${esc(s.weather.cond)}) &bull; 濕度: ${s.weather.hum}%`;
     }
 
     // Upstream DNS Active Display
@@ -280,23 +286,22 @@ async function load(){
       if(!row){row=document.createElement('tr');row.dataset.ip=c.ip;
       row.innerHTML=`<td class=cip></td><td class=cmac></td><td class="b cblk"></td><td class="a calw"></td><td><button class=ban data-ip="${c.ip}"></button></td>`;
       tb.appendChild(row);}
-      let ipH=esc(c.ip)+(c.banned?' <span class=tag style=color:#f85149>BANNED</span>':'');
+      let ipH=esc(c.ip)+(c.banned?' <span class=tag style=color:#f85149>已封鎖</span>':'');
       let tdIp=row.querySelector('.cip');if(tdIp.innerHTML!==ipH)tdIp.innerHTML=ipH;
       let tdMac=row.querySelector('.cmac');if(tdMac.textContent!==c.mac)tdMac.textContent=c.mac;
       let tdB=row.querySelector('.cblk'),bS=fmt(c.blocked);if(tdB.textContent!==bS)tdB.textContent=bS;
       let tdA=row.querySelector('.calw'),aS=fmt(c.allowed);if(tdA.textContent!==aS)tdA.textContent=aS;
-      let btn=row.querySelector('.ban'),wT=c.banned?'Unban':'Ban';if(btn.textContent!==wT)btn.textContent=wT;
+      let btn=row.querySelector('.ban'),wT=c.banned?'解除封鎖':'封鎖設備';if(btn.textContent!==wT)btn.textContent=wT;
     });
     Array.from(tb.children).forEach(r=>{if(r.dataset.ip&&!cur.has(r.dataset.ip))r.remove()});
 
     // Query Logs Table
     if(s.logs && s.logs.length){
-      let nowS = Math.floor(Date.now() / 1000);
       lt.tBodies[0].innerHTML = s.logs.map(l=>{
-        let st = l.b ? '<span class=badge-blk>BLOCKED</span>' : '<span class=badge-alw>FORWARD</span>';
-        let act = l.b ? `<button class="alwbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+Allow</button>`
-                      : `<button class="blkbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+Block</button>`;
-        return `<tr><td style="color:#8b949e">${l.t ? (l.t%86400<10?'0':'')+Math.floor((l.t%3600)/60)+'m '+(l.t%60)+'s' : 'just now'}</td><td>${esc(l.ip)}</td><td title="${esc(l.d)}">${esc(l.d)}</td><td>${st}</td><td>${act}</td></tr>`;
+        let st = l.b ? '<span class=badge-blk>已攔截</span>' : '<span class=badge-alw>已轉發</span>';
+        let act = l.b ? `<button class="alwbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+白名單</button>`
+                      : `<button class="blkbtn" data-d="${esc(l.d)}" style="padding:2px 8px;font-size:11px">+黑名單</button>`;
+        return `<tr><td style="color:#8b949e">${l.t ? (l.t%86400<10?'0':'')+Math.floor((l.t%3600)/60)+'分 '+(l.t%60)+'秒' : '剛剛'}</td><td>${esc(l.ip)}</td><td title="${esc(l.d)}">${esc(l.d)}</td><td>${st}</td><td>${act}</td></tr>`;
       }).join('');
     }
 
@@ -305,9 +310,9 @@ async function load(){
     if(topStr !== lastTop){
       lastTop = topStr;
       if(s.topBlocked && s.topBlocked.length){
-        tbt.tBodies[0].innerHTML = s.topBlocked.map((t,idx)=>`<tr><td><b>#${idx+1}</b></td><td title="${esc(t.domain)}">${esc(t.domain)}</td><td class=b>${fmt(t.count)}</td><td><button class=alwbtn data-d="${esc(t.domain)}" style="padding:2px 8px;font-size:11px">+Allow</button></td></tr>`).join('');
+        tbt.tBodies[0].innerHTML = s.topBlocked.map((t,idx)=>`<tr><td><b>#${idx+1}</b></td><td title="${esc(t.domain)}">${esc(t.domain)}</td><td class=b>${fmt(t.count)} 次</td><td><button class=alwbtn data-d="${esc(t.domain)}" style="padding:2px 8px;font-size:11px">+白名單</button></td></tr>`).join('');
       } else {
-        tbt.tBodies[0].innerHTML = '<tr><td colspan=4 style="color:#8b949e">No blocked queries recorded yet</td></tr>';
+        tbt.tBodies[0].innerHTML = '<tr><td colspan=4 style="color:#8b949e">目前尚無攔截記錄</td></tr>';
       }
     }
 
@@ -315,14 +320,14 @@ async function load(){
     let aStr = (s.allow||[]).join('|');
     if(aStr !== lastAllow){
       lastAllow = aStr;
-      at.tBodies[0].innerHTML = (s.allow&&s.allow.length)?s.allow.map(d=>`<tr><td>${esc(d)}</td><td style="text-align:right"><button class=rmalwbtn data-d="${esc(d)}">remove</button></td></tr>`).join(''):'<tr><td style="color:#8b949e">none yet</td></tr>';
+      at.tBodies[0].innerHTML = (s.allow&&s.allow.length)?s.allow.map(d=>`<tr><td>${esc(d)}</td><td style="text-align:right"><button class=rmalwbtn data-d="${esc(d)}">移除</button></td></tr>`).join(''):'<tr><td style="color:#8b949e">目前尚未加入任何白名單網域</td></tr>';
     }
 
     // Custom Block Table
     let cStr = (s.custom||[]).join('|');
     if(cStr !== lastCustom){
       lastCustom = cStr;
-      cl.tBodies[0].innerHTML=(s.custom&&s.custom.length)?s.custom.map(d=>`<tr><td>${esc(d)}</td><td style="text-align:right"><button class=rmbtn data-d="${esc(d)}">remove</button></td></tr>`).join(''):'<tr><td style="color:#8b949e">none yet</td></tr>';
+      cl.tBodies[0].innerHTML=(s.custom&&s.custom.length)?s.custom.map(d=>`<tr><td>${esc(d)}</td><td style="text-align:right"><button class=rmbtn data-d="${esc(d)}">移除</button></td></tr>`).join(''):'<tr><td style="color:#8b949e">目前尚未加入任何自訂黑名單</td></tr>';
     }
 
     if(document.activeElement!=uurl)uurl.value=s.upurl||'';
@@ -334,7 +339,7 @@ async function load(){
 async function changePassword(){
   let u=newuser.value.trim(), c=curpass.value, p=newpass.value;
   if(!p || p.length < 4){ alert('新密碼長度至少需 4 個字元 (Password must be at least 4 characters)'); return; }
-  pwdmsg.style.color='#8b949e';pwdmsg.textContent='Updating password...';
+  pwdmsg.style.color='#8b949e';pwdmsg.textContent='正在更新密碼...';
   try {
     let r = await fetch('/setpassword?newpass=' + encodeURIComponent(p) + '&curpass=' + encodeURIComponent(c) + (u ? ('&newuser=' + encodeURIComponent(u)) : ''), {
       method: 'POST',
@@ -369,19 +374,19 @@ document.addEventListener('click',e=>{
 });
 
 function saveUpd(){fetch('/setupdate?u='+encodeURIComponent(uurl.value.trim())+'&h='+(parseInt(uiv.value)||24),{headers:CSRF_HDRS}).then(load)}
-function fetchNow(){ustat.textContent='fetching...';fetch('/fetchnow',{headers:CSRF_HDRS}).then(r=>r.text()).then(t=>{ustat.textContent=t;load()})}
+function fetchNow(){ustat.textContent='下載更新中...';fetch('/fetchnow',{headers:CSRF_HDRS}).then(r=>r.text()).then(t=>{ustat.textContent=t;load()})}
 function forgetWifi(){fetch('/forgetwifi',{headers:CSRF_HDRS}).then(r=>r.text()).then(t=>alert(t))}
 
-fwf.onsubmit=async e=>{e.preventDefault();let f=fwb.files[0];if(!f)return;fwmsg.textContent='flashing '+(f.size/1048576).toFixed(2)+' MB...';
+fwf.onsubmit=async e=>{e.preventDefault();let f=fwb.files[0];if(!f)return;fwmsg.textContent='正在刷寫韌體 '+(f.size/1048576).toFixed(2)+' MB...';
   let fd=new FormData();fd.append('f',f);
-  try{let r=await fetch('/update',{method:'POST',headers:CSRF_HDRS,body:fd});fwmsg.textContent=r.ok?'✓ rebooting, reconnect in ~15s':'✗ '+await r.text();}
-  catch(_){fwmsg.textContent='✓ rebooting, reconnect in ~15s';}};
+  try{let r=await fetch('/update',{method:'POST',headers:CSRF_HDRS,body:fd});fwmsg.textContent=r.ok?'✓ 更新成功！設備重新啟動中，請於約 15 秒後重新整理網頁':'✗ '+await r.text();}
+  catch(_){fwmsg.textContent='✓ 更新成功！設備重新啟動中，請於約 15 秒後重新整理網頁';}};
 
 upf.onsubmit=async e=>{e.preventDefault();let f=blf.files[0];if(!f)return;
-  upmsg.textContent='uploading '+(f.size/1048576).toFixed(2)+' MB...';
+  upmsg.textContent='正在上傳規則檔 '+(f.size/1048576).toFixed(2)+' MB...';
   let fd=new FormData();fd.append('f',f);
-  try{let r=await fetch('/upload',{method:'POST',headers:CSRF_HDRS,body:fd});upmsg.textContent=r.ok?'✓ updated':'✗ '+await r.text();}
-  catch(_){upmsg.textContent='✗ upload failed';}
+  try{let r=await fetch('/upload',{method:'POST',headers:CSRF_HDRS,body:fd});upmsg.textContent=r.ok?'✓ 上傳更新成功！':'✗ '+await r.text();}
+  catch(_){upmsg.textContent='✗ 上傳失敗';}
   blf.value='';setTimeout(load,600);};
 
 load();setInterval(load,3000);
