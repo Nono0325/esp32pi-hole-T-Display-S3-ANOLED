@@ -22,6 +22,7 @@
 #include "display.h"   // T-Display-S3 AMOLED Screen & Interaction
 #include "imu.h"       // Gravity IMU auto-rotation & screen flip
 #include "device_id.h" // Smart Device Fingerprinting & Custom Aliases
+#include "spectrum.h"  // 2.4GHz WiFi Spectrum Radar & Congestion Analyzer
 
 // ---- config ----
 #ifndef UPSTREAM_IP
@@ -1376,6 +1377,7 @@ void setup() {
   }
   loadCustom(); loadAllow(); loadBanned(); loadUpdateCfg(); loadUpstream(); loadWeatherCfg(); loadLocalDns();
   initDeviceManager();
+  initSpectrumRadar();
   Serial.printf("custom: %d, allow: %d, banned: %d, localdns: %d, upstream: %s:%d, city: %s\n",
                 numCustom, numAllow, numBanned, numLocalDns, upstreamIP.toString().c_str(), upstreamPort, weatherCity.c_str());
 
@@ -1431,6 +1433,24 @@ void setup() {
   web.on("/screensaver", []() {
     if (!requireAuth()) return;
     startScreensaver();
+    web.send(200, "text/plain", "ok");
+  });
+  web.on("/api/spectrum", []() {
+    web.send(200, "application/json", getSpectrumJson());
+  });
+  web.on("/spectrum/scan", []() {
+    if (!requireAuth()) return;
+    triggerSpectrumScan();
+    web.send(200, "text/plain", "ok");
+  });
+  web.on("/spectrum/start", []() {
+    if (!requireAuth()) return;
+    startRadarMode();
+    web.send(200, "text/plain", "ok");
+  });
+  web.on("/spectrum/stop", []() {
+    if (!requireAuth()) return;
+    exitRadarMode();
     web.send(200, "text/plain", "ok");
   });
   web.on("/setpage", handleSetPage);

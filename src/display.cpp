@@ -3,6 +3,7 @@
 #include "pins_config.h"
 #include "imu.h"
 #include "device_id.h"
+#include "spectrum.h"
 #include <TFT_eSPI.h>
 #include <OneButton.h>
 #include <Wire.h>
@@ -79,6 +80,7 @@ static uint8_t brightnessLevels[] = {255, 170, 75, 15};
 static uint8_t brightnessIndex = 1; // Default to 66% (170) to reduce AMOLED heat and power draw
 static bool screenAsleep = false;
 static bool screensaverActive = false;
+static bool radarActive = false;
 
 // Sleep Timeout & Activity State (persisted in NVS "disp")
 static uint32_t sleepTimeoutSec = 300; // default 5 minutes (0 = never)
@@ -117,6 +119,7 @@ static void drawPageTopBlocked();
 static void drawPageSystem();
 static void drawPageQR();
 static void drawPageMatrixScreensaver();
+static void drawPageSpectrumRadar();
 static void drawHeader(const char* title, uint16_t titleColor);
 static void drawFooter();
 static void drawToast();
@@ -204,6 +207,7 @@ bool isScreensaverActive() {
 
 void startScreensaver() {
     screensaverActive = true;
+    radarActive = false;
     resetActivityTimer();
     updateDisplay(true);
     Serial.println("[display] Matrix Screensaver activated");
@@ -218,9 +222,36 @@ void exitScreensaver() {
     }
 }
 
+bool isRadarActive() {
+    return radarActive;
+}
+
+void startRadarMode() {
+    radarActive = true;
+    screensaverActive = false;
+    resetActivityTimer();
+    triggerSpectrumScan();
+    displayToast("📡 SPECTRUM RADAR ACTIVE", 1500);
+    updateDisplay(true);
+    Serial.println("[display] 2.4GHz WiFi Spectrum Radar mode started");
+}
+
+void exitRadarMode() {
+    if (radarActive) {
+        radarActive = false;
+        resetActivityTimer();
+        updateDisplay(true);
+        Serial.println("[display] Exited Spectrum Radar mode -> Returning to dashboard");
+    }
+}
+
 void nextPage() {
     if (screensaverActive) {
         exitScreensaver();
+        return;
+    }
+    if (radarActive) {
+        exitRadarMode();
         return;
     }
     currentPage = (currentPage + 1) % MAX_PAGES;
@@ -233,6 +264,7 @@ void setDisplayPage(uint8_t page) {
         return;
     }
     screensaverActive = false;
+    radarActive = false;
     currentPage = page;
     if (screenAsleep) {
         wakeupDisplay();
@@ -251,6 +283,11 @@ static void onBtn1Click() {
         exitScreensaver();
         return;
     }
+    if (radarActive) {
+        triggerSpectrumScan();
+        displayToast("📡 RESCANNING SPECTRUM...", 1500);
+        return;
+    }
     nextPage();
 }
 
@@ -264,9 +301,29 @@ static void onBtn1DoubleClick() {
         exitScreensaver();
         return;
     }
+    if (radarActive) {
+        exitRadarMode();
+        return;
+    }
     nextPage();
     displayToast("👆 2x CLICK: NEXT PAGE", 1500);
     Serial.println("[button] Button 1 Double-Click (Tap-Tap) -> Switched page");
+}
+
+static void onBtn1MultiClick() {
+    resetActivityTimer();
+    if (screenAsleep) {
+        wakeupDisplay();
+        return;
+    }
+    int clicks = btn1.getNumberClicks();
+    if (clicks == 3) {
+        if (radarActive) {
+            exitRadarMode();
+        } else {
+            startRadarMode();
+        }
+    }
 }
 
 static void onBtn1LongPress() {
@@ -277,6 +334,10 @@ static void onBtn1LongPress() {
     }
     if (screensaverActive) {
         exitScreensaver();
+        return;
+    }
+    if (radarActive) {
+        exitRadarMode();
         return;
     }
     displayToast("UPDATING RULES...", 3000);
@@ -296,6 +357,10 @@ static void onBtn2Click() {
     }
     if (screensaverActive) {
         exitScreensaver();
+        return;
+    }
+    if (radarActive) {
+        exitRadarMode();
         return;
     }
     // Toggle blocking state: Active <-> Paused 5 mins (300s)
@@ -318,6 +383,10 @@ static void onBtn2LongPress() {
     }
     if (screensaverActive) {
         exitScreensaver();
+        return;
+    }
+    if (radarActive) {
+        exitRadarMode();
         return;
     }
     brightnessIndex = (brightnessIndex + 1) % 4;
@@ -628,6 +697,7 @@ void initDisplay() {
     // 4. Configure Buttons
     btn1.attachClick(onBtn1Click);
     btn1.attachDoubleClick(onBtn1DoubleClick); // Double-click Button 1 (BOOT) -> Tap-Tap Next Page
+    btn1.attachMultiClick(onBtn1MultiClick);   // 3x clicks Button 1 -> 2.4GHz WiFi Spectrum Radar
     btn1.attachLongPressStart(onBtn1LongPress);
     btn2.attachClick(onBtn2Click);
     btn2.attachDoubleClick(flipScreen180); // Double-click Button 2 to flip 180 degrees
@@ -685,6 +755,10 @@ static void checkTouch() {
                 exitScreensaver();
                 return;
             }
+            if (radarActive) {
+                exitRadarMode();
+                return;
+            }
             uint16_t tx = (xHigh << 8) | xLow;
             uint16_t ty = (yHigh << 8) | yLow;
 
@@ -732,12 +806,14 @@ void updateDisplay(bool force) {
     checkTouch();
     if (!screenAsleep) {
         updateIMU(); // Skip I2C accelerometer polling when screen is sleeping to save power
+        updateSpectrumScan(); // Process async WiFi scan if active
     }
 
     // Inactivity screensaver & sleep check
     if (sleepTimeoutSec > 0 && !screenAsleep && (millis() - lastActivityMs >= sleepTimeoutSec * 1000UL)) {
         if (!screensaverActive) {
             // First step of idle: enter Matrix Code Rain Screensaver
+            if (radarActive) exitRadarMode();
             screensaverActive = true;
             lastActivityMs = millis();
             displayToast("MATRIX SCREENSAVER", 1500);
@@ -771,7 +847,7 @@ void updateDisplay(bool force) {
     }
 
     static uint32_t lastRender = 0;
-    uint32_t renderInterval = screensaverActive ? 35 : 350; // Fluid ~28FPS for Matrix, 3FPS for dashboards
+    uint32_t renderInterval = (screensaverActive || radarActive) ? 35 : 350; // Fluid ~28FPS for Matrix & Radar, 3FPS for dashboards
     if (!force && millis() - lastRender < renderInterval) return;
     lastRender = millis();
 
@@ -779,6 +855,8 @@ void updateDisplay(bool force) {
 
     if (screensaverActive) {
         drawPageMatrixScreensaver();
+    } else if (radarActive) {
+        drawPageSpectrumRadar();
     } else {
         switch (currentPage) {
             case 0: drawPageOverview();          break;
@@ -1654,5 +1732,228 @@ static void drawPageMatrixScreensaver() {
     spr.setTextDatum(MC_DATUM);
     spr.setTextColor(COLOR_GRAY, COLOR_BG);
     spr.drawString("[ TAP 2x / ANY KEY TO EXIT SCREENSAVER ]", SCREEN_W / 2, SCREEN_H - 14, 2);
+}
+
+// ==================== 2.4GHz WiFi Airborne Spectrum Radar ====================
+static void drawPageSpectrumRadar() {
+    const SpectrumData& s = getSpectrumData();
+
+    // 1. Header (y: 6 to 26)
+    drawHeader("2.4GHz AIR SPECTRUM RADAR", COLOR_CYAN);
+
+    // 2. Main Spectrum Chart Box (x: 12, y: 34, w: 336, h: 168)
+    int chartX = 12;
+    int chartY = 34;
+    int chartW = 336;
+    int chartH = 168;
+
+    spr.fillRoundRect(chartX, chartY, chartW, chartH, 8, COLOR_CARD);
+    spr.drawRoundRect(chartX, chartY, chartW, chartH, 8, COLOR_CARD_BORDER);
+
+    // Grid baseline
+    int baseY = chartY + chartH - 24;
+    int plotTopY = chartY + 20;
+    int plotH = baseY - plotTopY; // ~124px
+
+    // Horizontal dBm reference grid lines
+    spr.setTextDatum(MR_DATUM);
+    spr.setTextColor(COLOR_DARKGRAY, COLOR_CARD);
+    const int dbmLevels[] = {-40, -60, -80};
+    for (int lvl : dbmLevels) {
+        int gy = plotTopY + (int)((float)(-40 - lvl) / 55.0f * (float)plotH);
+        if (gy < baseY) {
+            spr.drawFastHLine(chartX + 28, gy, chartW - 36, 0x1925);
+            char lbl[8];
+            snprintf(lbl, sizeof(lbl), "%d", lvl);
+            spr.drawString(lbl, chartX + 26, gy, 1);
+        }
+    }
+
+    // Channel X positions (Channels 1 to 14)
+    int startX = chartX + 38;
+    int endX = chartX + chartW - 14;
+    float chStep = (float)(endX - startX) / 13.0f; // 13 gaps for 14 channels
+
+    // Draw vertical channel ticks and channel numbers
+    spr.setTextDatum(MC_DATUM);
+    for (int c = 1; c <= 14; c++) {
+        int cx = startX + (int)((c - 1) * chStep);
+        bool isPrimary = (c == 1 || c == 6 || c == 11);
+        spr.drawFastVLine(cx, baseY - 4, 4, isPrimary ? COLOR_CYAN : COLOR_DARKGRAY);
+
+        // Channel number at bottom
+        if (isPrimary) {
+            spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+            spr.drawString(String(c), cx, baseY + 8, 2);
+        } else if (c % 2 == 0 || c == 13) {
+            spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+            spr.drawString(String(c), cx, baseY + 8, 1);
+        }
+    }
+
+    // Draw 20MHz RF Parabolic domes for all detected APs
+    float domeRadiusPx = chStep * 2.0f;
+
+    for (int i = s.apCount - 1; i >= 0; i--) {
+        const WifiApInfo& ap = s.aps[i];
+        if (ap.channel < 1 || ap.channel > 14) continue;
+
+        int cx = startX + (int)((ap.channel - 1) * chStep);
+
+        // Height proportional to RSSI (-95 to -35 dBm)
+        float normRssi = (float)(ap.rssi - (-95)) / 60.0f;
+        if (normRssi < 0.08f) normRssi = 0.08f;
+        if (normRssi > 1.0f) normRssi = 1.0f;
+        int peakH = (int)(normRssi * (plotH - 10));
+
+        // Color coding:
+        uint16_t color;
+        if (ap.isCurrent) {
+            color = COLOR_CYAN;
+        } else if (ap.rssi >= -65) {
+            color = COLOR_GREEN;
+        } else if (ap.rssi >= -78) {
+            color = COLOR_AMBER;
+        } else {
+            color = COLOR_PURPLE;
+        }
+
+        // Draw parabolic curve points
+        int xMin = cx - (int)domeRadiusPx;
+        int xMax = cx + (int)domeRadiusPx;
+        if (xMin < chartX + 28) xMin = chartX + 28;
+        if (xMax > endX) xMax = endX;
+
+        int prevPx = -1, prevPy = -1;
+        for (int px = xMin; px <= xMax; px += 2) {
+            float dx = (float)(px - cx) / domeRadiusPx;
+            float curve = 1.0f - (dx * dx);
+            if (curve < 0.0f) curve = 0.0f;
+            int py = baseY - (int)(curve * peakH);
+
+            if (prevPx != -1) {
+                spr.drawLine(prevPx, prevPy, px, py, color);
+                if (ap.isCurrent) {
+                    spr.drawLine(prevPx, prevPy - 1, px, py - 1, COLOR_WHITE);
+                }
+            }
+            prevPx = px;
+            prevPy = py;
+        }
+
+        // Peak node
+        int apexY = baseY - peakH;
+        spr.fillCircle(cx, apexY, ap.isCurrent ? 4 : 2, ap.isCurrent ? COLOR_WHITE : color);
+
+        // Label strongest APs (top 2 or current)
+        if (ap.isCurrent || (i < 2 && peakH > 40)) {
+            char miniName[12];
+            strncpy(miniName, ap.ssid, 10);
+            miniName[10] = '\0';
+            spr.setTextDatum(BC_DATUM);
+            spr.setTextColor(ap.isCurrent ? COLOR_WHITE : color, COLOR_CARD);
+            spr.drawString(miniName, cx, apexY - 3, 1);
+        }
+    }
+
+    // Congestion indicator bar for channels 1..14 (y: baseY + 14)
+    for (int c = 1; c <= 14; c++) {
+        int cx = startX + (int)((c - 1) * chStep);
+        uint8_t sc = s.chScore[c];
+        uint16_t cColor = (sc > 70) ? COLOR_RED : ((sc > 35) ? COLOR_AMBER : COLOR_GREEN);
+        spr.fillRect(cx - 3, chartY + chartH - 7, 7, 4, cColor);
+    }
+
+    // Scanning radar laser sweep animation
+    if (s.scanning) {
+        static int sweepX = chartX + 30;
+        sweepX += 7;
+        if (sweepX > endX) sweepX = chartX + 30;
+        spr.drawFastVLine(sweepX, plotTopY, plotH, COLOR_GREEN);
+        spr.drawFastVLine(sweepX - 1, plotTopY, plotH, COLOR_CYAN);
+        spr.drawFastVLine(sweepX - 2, plotTopY, plotH, 0x03E0);
+
+        spr.setTextDatum(TC_DATUM);
+        spr.setTextColor(COLOR_GREEN, COLOR_CARD);
+        spr.drawString(">> SCANNING 2.4GHz AIR SIGNALS... <<", chartX + chartW / 2, plotTopY + 8, 2);
+    }
+
+    // 3. Right Telemetry & Best Channel Sidebar (x: 356, y: 34, w: 168, h: 168)
+    int sideX = 356;
+    int sideY = 34;
+    int sideW = 168;
+    int sideH = 168;
+
+    spr.fillRoundRect(sideX, sideY, sideW, sideH, 8, COLOR_CARD);
+    spr.drawRoundRect(sideX, sideY, sideW, sideH, 8, COLOR_CARD_BORDER);
+
+    // Current Connection Card
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    spr.drawString("CURRENT CONNECTION", sideX + 10, sideY + 8, 1);
+
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_CYAN, COLOR_CARD);
+    char curInfo[32];
+    snprintf(curInfo, sizeof(curInfo), "CH %d (%ddBm)", s.currentChannel, WiFi.RSSI());
+    spr.drawString(curInfo, sideX + 10, sideY + 20, 2);
+
+    spr.setTextColor(COLOR_WHITE, COLOR_CARD);
+    String ssidShort = WiFi.SSID();
+    if (ssidShort.length() > 14) ssidShort = ssidShort.substring(0, 14) + "..";
+    spr.drawString(ssidShort, sideX + 10, sideY + 36, 1);
+
+    spr.drawFastHLine(sideX + 10, sideY + 52, sideW - 20, COLOR_CARD_BORDER);
+
+    // Recommended Best Channel Badge
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GREEN, COLOR_CARD);
+    spr.drawString("RECOMMENDED CHANNEL", sideX + 10, sideY + 58, 1);
+
+    spr.fillRoundRect(sideX + 10, sideY + 70, sideW - 20, 26, 6, 0x0420);
+    spr.drawRoundRect(sideX + 10, sideY + 70, sideW - 20, 26, 6, COLOR_GREEN);
+    spr.setTextDatum(MC_DATUM);
+    spr.setTextColor(COLOR_WHITE, 0x0420);
+    char bestStr[32];
+    snprintf(bestStr, sizeof(bestStr), "CHANNEL %d (LOWEST)", s.bestChannel);
+    spr.drawString(bestStr, sideX + sideW / 2, sideY + 83, 2);
+
+    spr.drawFastHLine(sideX + 10, sideY + 102, sideW - 20, COLOR_CARD_BORDER);
+
+    // Nearby AP stats
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+    char apTotalStr[32];
+    snprintf(apTotalStr, sizeof(apTotalStr), "DETECTED: %d APs", s.apCount);
+    spr.drawString(apTotalStr, sideX + 10, sideY + 108, 1);
+
+    // List top 2 strongest neighbors
+    int rowY = sideY + 122;
+    int shown = 0;
+    for (int i = 0; i < s.apCount && shown < 2; i++) {
+        if (s.aps[i].isCurrent) continue;
+        char apRow[32];
+        String shortName = String(s.aps[i].ssid);
+        if (shortName.length() > 9) shortName = shortName.substring(0, 9) + "..";
+        snprintf(apRow, sizeof(apRow), "C%d %s", s.aps[i].channel, shortName.c_str());
+        spr.setTextColor(COLOR_GRAY, COLOR_CARD);
+        spr.drawString(apRow, sideX + 10, rowY, 1);
+
+        char rssiStr[12];
+        snprintf(rssiStr, sizeof(rssiStr), "%ddB", s.aps[i].rssi);
+        spr.setTextDatum(TR_DATUM);
+        spr.setTextColor(s.aps[i].rssi >= -70 ? COLOR_GREEN : COLOR_AMBER, COLOR_CARD);
+        spr.drawString(rssiStr, sideX + sideW - 10, rowY, 1);
+        spr.setTextDatum(TL_DATUM);
+
+        rowY += 14;
+        shown++;
+    }
+
+    // 4. Footer Help Prompt
+    spr.drawFastHLine(12, 206, SCREEN_W - 24, COLOR_CARD_BORDER);
+    spr.setTextDatum(TL_DATUM);
+    spr.setTextColor(COLOR_GRAY, COLOR_BG);
+    spr.drawString("[KEY 1] Rescan  [KEY 2 / 2x / TAP] Exit Radar", 14, 215, 2);
 }
 

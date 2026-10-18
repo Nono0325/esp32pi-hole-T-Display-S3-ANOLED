@@ -243,8 +243,8 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
       <button onclick="setScreenPage(2)">第 2 頁: 時鐘與天氣</button>
       <button onclick="setScreenPage(3)">第 3 頁: 攔截排行</button>
       <button onclick="setScreenPage(4)">第 4 頁: 硬體健康</button>
-      <button onclick="setScreenPage(5)">第 5 頁: 掃碼連線</button>
-      <button onclick="triggerScreensaver()" style="background:#042f1a;color:#3fb950;border-color:#238636;font-weight:600">⚡ 獨立模式: 賽博代碼雨屏保</button>
+      <button onclick="triggerScreensaver()" style="background:#042f1a;color:#3fb950;border-color:#238636;font-weight:600">⚡ 獨立模式: 代碼雨屏保</button>
+      <button onclick="launchRadarOnScreen()" style="background:#0d3846;color:#58a6ff;border-color:#1f6feb;font-weight:600">📡 獨立模式: 空中頻譜雷達</button>
     </div>
 
     <div style="font-weight:600;margin-bottom:8px">硬體感測與雷達測試工具</div>
@@ -265,7 +265,30 @@ h2{font-size:14px;color:#8b949e;margin:20px 0 8px;display:flex;align-items:cente
     </div>
   </div>
 
-  <h2>🔄 4. 廣告規則資料庫維護</h2>
+  <h2>📡 4. 空中 2.4GHz WiFi 頻譜雷達 (Airborne Spectrum Radar)</h2>
+  <div class=panel>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px">
+        <span id="spec_badge" style="background:#0d3846;color:#58a6ff;border:1px solid #1f6feb;border-radius:6px;padding:4px 10px;font-weight:bold;font-size:13px">最佳推薦頻道: 讀取中...</span>
+        <span id="spec_cur" style="color:#8b949e;font-size:12px">目前連線頻道: --</span>
+        <span id="spec_count" style="color:#8b949e;font-size:12px">已掃描: 0 APs</span>
+      </div>
+      <div class=btn-grp>
+        <button onclick="rescanSpectrum()" style="background:#1f6feb;color:#fff;border-color:#388bfd">📡 重新掃描空中頻譜</button>
+        <button onclick="launchRadarOnScreen()" style="background:#238636;color:#fff;border-color:#2ea043;font-weight:600">📺 在 AMOLED 螢幕即時顯示雷達</button>
+        <button onclick="stopRadarOnScreen()">關閉螢幕雷達</button>
+      </div>
+    </div>
+    <canvas id="specCanvas" width="800" height="230" style="width:100%;height:230px;background:#08131e;border:1px solid #13283b;border-radius:8px;margin-bottom:12px;display:block"></canvas>
+    <div style="font-size:12px;color:#8b949e;margin-bottom:10px">💡 2.4GHz 頻段中，Channel 1、6、11 為互不重疊干擾之黃金頻道。選擇擁擠度最低之推薦頻道可顯著降低封包碰撞與網路延遲。</div>
+    <table id="specTable" style="margin-bottom:0">
+      <colgroup><col style="width:34%"><col style="width:14%"><col style="width:18%"><col style="width:22%"><col style="width:12%"></colgroup>
+      <thead><tr><th>SSID 網路名稱</th><th>頻道 (CH)</th><th>訊號強度 (RSSI)</th><th>MAC (BSSID)</th><th>加密類型</th></tr></thead>
+      <tbody><tr><td colspan="5" style="color:#8b949e">載入頻譜資料中...</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>🔄 5. 廣告規則資料庫維護</h2>
   <div class=panel>
     <div style="font-weight:600;margin-bottom:6px">遠端定期自動更新 (Remote Auto-Update)</div>
     <div class=tool-row>
@@ -375,8 +398,10 @@ function switchTab(id){
   if(btn) btn.classList.add('active');
   if(view) view.classList.add('active');
   window.location.hash = id;
+  if(id === 'settings') setTimeout(loadSpectrum, 50);
 }
 if(window.location.hash === '#settings') switchTab('settings');
+else setTimeout(loadSpectrum, 1200);
 
 function togglePause(){fetch(blockstate.dataset.on=='1'?'/pause?s='+pausedur.value:'/resume',{headers:CSRF_HDRS}).then(load);}
 function flipScreen(){fetch('/flip',{headers:CSRF_HDRS});}
@@ -758,6 +783,131 @@ async function triggerGestureTest(){
 async function triggerScreensaver(){
   await fetch('/screensaver', {headers: CSRF_HDRS});
   load();
+}
+
+function drawSpectrumCanvas(data){
+  let c=document.getElementById('specCanvas');
+  if(!c)return;
+  let ctx=c.getContext('2d');
+  let W=c.width,H=c.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#08131e';
+  ctx.fillRect(0,0,W,H);
+  let baseY=H-32,topY=24,plotH=baseY-topY;
+
+  ctx.strokeStyle='#13283b';ctx.lineWidth=1;
+  [-40,-60,-80].forEach(lvl=>{
+    let y=topY+((-40-lvl)/55)*plotH;
+    ctx.beginPath();ctx.moveTo(35,y);ctx.lineTo(W-20,y);ctx.stroke();
+    ctx.fillStyle='#58748e';ctx.font='10px monospace';ctx.fillText(lvl+' dBm',6,y+3);
+  });
+
+  let startX=45,endX=W-25,chStep=(endX-startX)/13;
+  for(let ch=1;ch<=14;ch++){
+    let cx=startX+(ch-1)*chStep;
+    let isPrim=(ch==1||ch==6||ch==11);
+    ctx.strokeStyle=isPrim?'#00f0ff':'#22384c';
+    ctx.beginPath();ctx.moveTo(cx,baseY);ctx.lineTo(cx,baseY+6);ctx.stroke();
+    ctx.fillStyle=isPrim?'#00f0ff':'#8b949e';
+    ctx.font=isPrim?'bold 12px system-ui':'10px system-ui';
+    ctx.textAlign='center';
+    ctx.fillText('CH '+ch,cx,baseY+18);
+    if(data.channels&&data.channels[ch-1]){
+      let sc=data.channels[ch-1].score;
+      ctx.fillStyle=sc>70?'#f85149':(sc>35?'#e3b341':'#3fb950');
+      ctx.fillRect(cx-7,baseY+22,14,4);
+    }
+  }
+
+  let domeRad=chStep*2.0;
+  if(data.aps&&data.aps.length){
+    for(let i=data.aps.length-1;i>=0;i--){
+      let ap=data.aps[i];
+      if(ap.ch<1||ap.ch>14)continue;
+      let cx=startX+(ap.ch-1)*chStep;
+      let norm=(ap.rssi-(-95))/60;
+      if(norm<0.08)norm=0.08;if(norm>1.0)norm=1.0;
+      let peakH=norm*(plotH-10);
+      let apexY=baseY-peakH;
+      let col=ap.isCur?'#00f0ff':(ap.rssi>=-65?'#3fb950':(ap.rssi>=-78?'#e3b341':'#a371f7'));
+      ctx.beginPath();ctx.strokeStyle=col;ctx.lineWidth=ap.isCur?2.5:1.5;
+      let xMin=Math.max(35,cx-domeRad),xMax=Math.min(endX,cx+domeRad);
+      for(let x=xMin;x<=xMax;x+=2){
+        let dx=(x-cx)/domeRad;let cv=1.0-(dx*dx);if(cv<0)cv=0;
+        let y=baseY-cv*peakH;
+        if(x===xMin)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+      }
+      ctx.stroke();
+      ctx.fillStyle=ap.isCur?'#ffffff':col;
+      ctx.beginPath();ctx.arc(cx,apexY,ap.isCur?4:2.5,0,Math.PI*2);ctx.fill();
+      if(ap.isCur||i<3){
+        ctx.fillStyle=ap.isCur?'#00f0ff':'#c9d1d9';
+        ctx.font='10px system-ui';ctx.textAlign='center';
+        let lbl=(ap.ssid.length>12?ap.ssid.slice(0,10)+'..':ap.ssid)+' ('+ap.rssi+')';
+        ctx.fillText(lbl,cx,apexY-5);
+      }
+    }
+  }
+
+  if(data.scanning){
+    let sweepX=startX+((Date.now()/15)%(endX-startX));
+    let grad=ctx.createLinearGradient(sweepX-25,0,sweepX,0);
+    grad.addColorStop(0,'rgba(0,240,255,0)');grad.addColorStop(1,'rgba(0,240,255,0.4)');
+    ctx.fillStyle=grad;ctx.fillRect(sweepX-25,topY,25,plotH);
+    ctx.strokeStyle='#00f0ff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(sweepX,topY);ctx.lineTo(sweepX,baseY);ctx.stroke();
+    ctx.fillStyle='#00f0ff';ctx.font='bold 12px system-ui';ctx.textAlign='center';
+    ctx.fillText('📡 空中 2.4GHz 頻率掃描中...',W/2,topY+16);
+  }
+}
+
+async function loadSpectrum(){
+  try{
+    let r=await fetch('/api/spectrum');
+    if(!r.ok)return;
+    let d=await r.json();
+    if(window.spec_badge){
+      spec_badge.innerHTML='★ 推薦最佳頻道: CH '+d.bestCh+' (干擾最低)';
+      spec_badge.style.borderColor='#2ea043';spec_badge.style.color='#3fb950';spec_badge.style.background='#1b3320';
+    }
+    if(window.spec_cur)spec_cur.textContent='目前連線: CH '+d.curCh;
+    if(window.spec_count)spec_count.textContent='已掃描: '+d.apCount+' 個基地台 (APs)';
+    drawSpectrumCanvas(d);
+    if(window.specTable&&d.aps){
+      let tbody=specTable.querySelector('tbody');
+      if(d.aps.length===0){
+        tbody.innerHTML='<tr><td colspan=5 style="color:#8b949e">目前未偵測到基地台，請點擊重新掃描</td></tr>';
+      } else {
+        let authNames=['OPEN','WEP','WPA_PSK','WPA2_PSK','WPA_WPA2','WPA2_ENT','WPA3_PSK','WPA2_WPA3','WAPI'];
+        tbody.innerHTML=d.aps.map(ap=>{
+          let barW=Math.max(8,Math.min(100,(ap.rssi+100)*1.6));
+          let barCol=ap.rssi>=-65?'#3fb950':(ap.rssi>=-78?'#e3b341':'#f85149');
+          let enc=authNames[ap.enc]||'WPA2';
+          let curTag=ap.isCur?' <span style="background:#0d3846;color:#58a6ff;padding:1px 5px;border-radius:4px;font-size:10px">目前連線</span>':'';
+          return '<tr><td><b>'+(ap.ssid||'&lt;Hidden&gt;')+'</b>'+curTag+'</td>'+
+                 '<td>CH '+ap.ch+'</td>'+
+                 '<td><div style="display:flex;align-items:center;gap:6px">'+
+                 '<div style="width:40px;height:6px;background:#21262d;border-radius:3px;overflow:hidden">'+
+                 '<div style="width:'+barW+'%;height:100%;background:'+barCol+'"></div></div>'+
+                 '<span>'+ap.rssi+' dBm</span></div></td>'+
+                 '<td style="font-family:monospace;font-size:11px">'+ap.bssid+'</td>'+
+                 '<td><span class=tag>'+enc+'</span></td></tr>';
+        }).join('');
+      }
+    }
+  }catch(_){}
+}
+async function rescanSpectrum(){
+  await fetch('/spectrum/scan',{headers:CSRF_HDRS});
+  testres.innerHTML='<span style="color:#00f0ff">📡 已啟動非阻塞空中 2.4GHz 頻譜掃描！約 2 秒後完成...</span>';
+  setTimeout(loadSpectrum,1800);
+}
+async function launchRadarOnScreen(){
+  await fetch('/spectrum/start',{headers:CSRF_HDRS});
+  testres.innerHTML='<span style="color:#3fb950">📺 已在 AMOLED 螢幕即時顯示 2.4GHz 空中頻譜雷達！</span>';
+}
+async function stopRadarOnScreen(){
+  await fetch('/spectrum/stop',{headers:CSRF_HDRS});
+  testres.innerHTML='<span style="color:#8b949e">✓ 已關閉螢幕雷達並返回儀表板</span>';
 }
 
 fwf.onsubmit=async e=>{e.preventDefault();let f=fwb.files[0];if(!f)return;fwmsg.textContent='正在刷寫韌體 '+(f.size/1048576).toFixed(2)+' MB...';

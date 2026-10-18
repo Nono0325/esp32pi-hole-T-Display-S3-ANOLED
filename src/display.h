@@ -35,6 +35,11 @@ bool isScreensaverActive();
 void startScreensaver();
 void exitScreensaver();
 
+// Check and control 2.4GHz WiFi Spectrum Radar mode
+bool isRadarActive();
+void startRadarMode();
+void exitRadarMode();
+
 // Screen sleep and wakeup controls
 void sleepDisplay();
 void wakeupDisplay();
